@@ -159,7 +159,9 @@
       "x86_64-opengl/opengl32.dll",
       "x86_64-opengl/libgallium_wgl.dll",
       "x86_64-opengl/dxil.dll",
-      "x86_64-opengl/LICENSE-dxil.txt"
+      "x86_64-opengl/LICENSE-dxil.txt",
+      "x86_64-opengl/LICENSE-Mesa.rst",
+      "x86_64-opengl/LICENSE-DirectX-Headers.txt"
     ]
   },
   "vulkan-pe": {

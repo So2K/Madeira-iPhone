@@ -26,7 +26,8 @@ def targets(arch):
     farm = ROOT / f'app/Madeira/{arch}-windows'
     for dest in sorted(farm.iterdir()):
         name = dest.name.lower()
-        if name in DXMT | CUSTOM | VERSIONED or (arch == 'arm64ec' and name in {'d3d12.dll', 'd3d12core.dll'}):
+        dxmt = DXMT if arch == 'arm64ec' else {'d3d11.dll', 'dxgi.dll', 'winemetal.dll'}
+        if name in dxmt | CUSTOM | VERSIONED or (arch == 'arm64ec' and name in {'d3d12.dll', 'd3d12core.dll'}):
             continue
         source = 'd3d9.dll' if name == 'd3d9-wined3d.dll' else name
         if source not in modules:

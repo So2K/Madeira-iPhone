@@ -3,6 +3,8 @@
 import importlib.util
 from itertools import product
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import shutil
 import struct
@@ -109,6 +111,19 @@ class RuntimeTests(unittest.TestCase):
             runtime.stage('dock', self.sdk)
         self.assertEqual(original, (self.root / 'app/Madeira/arm64ec-windows/dockhost.exe').read_bytes())
 
+    def test_cache_hit_and_failed_rebuild(self):
+        runtime.snapshot('dock', self.sdk)
+        with patch.dict(os.environ, MADEIRA_RUNTIME_REUSE='1'):
+            with patch.object(runtime, 'stage', return_value={}), patch.object(runtime.subprocess, 'run') as run:
+                runtime.build('dock', self.sdk)
+                run.assert_not_called()
+            cache = self.root / '.runtime-cache/dock/manifest.json'
+            previous = cache.read_bytes()
+            with patch.object(runtime, 'stage', side_effect=ValueError('changed SDK')), patch.object(runtime.subprocess, 'run', side_effect=subprocess.CalledProcessError(86, 'builder')):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    runtime.build('dock', 'changed SDK')
+            self.assertEqual(previous, cache.read_bytes())
+
     def test_required_files_architecture_and_platform(self):
         snapshots = self.snapshots()
         bundle = self.root / 'app/Madeira'
@@ -129,6 +144,25 @@ class RuntimeTests(unittest.TestCase):
                 runtime.check_binary('gl/libOSMesa.dylib', macho(platform))
         with self.assertRaises(ValueError):
             runtime.check_binary('gl/libOSMesa.dylib', macho()[:40])
+
+    def test_wine_temporary_edits_preserve_local_source_on_failure(self):
+        script = self.write('build/wine-pe/build-modules.sh',
+                            (ROOT / 'build/wine-pe/build-modules.sh').read_bytes())
+        source = self.write('wine/dlls/example/Makefile.in',
+                            b'MODULE = example.dll\nIMPORTS = kernel32\nDELAYIMPORTS = kernel32\n# local edit\n')
+        original = source.read_bytes()
+        self.write('wine/build-arm64ec/config.status', b'configured')
+        self.write('app/Madeira/arm64ec-windows/kernel32.dll', pe(0x8664))
+        strip = self.write('toolchains/llvm-mingw-20260421-ucrt-macos-universal/bin/arm64ec-w64-mingw32-strip',
+                           b'#!/bin/sh\nexit 0\n')
+        strip.chmod(0o755)
+        make = self.write('bin/make', b'#!/bin/sh\nexit 86\n')
+        make.chmod(0o755)
+        result = subprocess.run(['bash', str(script), 'example'], cwd=self.root,
+                                env=dict(os.environ, PATH=str(make.parent) + os.pathsep + os.environ['PATH']),
+                                capture_output=True)
+        self.assertEqual(result.returncode, 86, result.stderr)
+        self.assertEqual(original, source.read_bytes())
 
     def test_rebuilt_outputs_do_not_change_source_key(self):
         before = runtime.input_key('windows', self.sdk)

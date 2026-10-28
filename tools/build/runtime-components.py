@@ -112,7 +112,11 @@ def validate_manifest(name, manifest, read, sdk):
     if manifest.get('schema') != 1 or manifest.get('key') != input_key(name, sdk):
         raise ValueError(f'{name}: source or SDK does not match')
     files = manifest.get('files', {})
-    if not isinstance(files, dict) or not set(CONTRACT[name]['required']) <= files.keys():
+    required = set(CONTRACT[name]['required'])
+    if name == 'windows':
+        required |= {p.removeprefix('app/Madeira/') for p in git('ls-files', 'app/Madeira').splitlines()
+                     if owns(name, p.removeprefix('app/Madeira/'))}
+    if not isinstance(files, dict) or not required <= files.keys():
         raise ValueError(f'{name}: required runtime files are missing')
     for path, sha in files.items():
         safe_path(path)

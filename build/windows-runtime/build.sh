@@ -34,6 +34,8 @@ for arch in arm64ec aarch64; do
     SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" meson compile -C "$B"
     DEST="$R/app/Madeira/$arch-windows"
     for m in d3d11/d3d11.dll dxgi/dxgi.dll d3d10/d3d10core.dll winemetal/winemetal.dll; do
+        # The existing aarch64 farm uses Wine's D3D10 core and D3D9 frontend.
+        [ "$arch:$m" != aarch64:d3d10/d3d10core.dll ] || continue
         "$TC/$arch-w64-mingw32-strip" --strip-debug -o "$DEST/$(basename "$m")" "$B/src/$m"
     done
     if [ "$arch" = arm64ec ]; then
