@@ -296,7 +296,7 @@ ar rcs "$OBJ_DIR/libntdll_unix.a" \
     "$OBJ_DIR/dwrite_unixlib.o" "$OBJ_DIR/dnsapi_unixlib.o" "$OBJ_DIR/opengl32_wgl.o" "$OBJ_DIR/opengl32_thunks.o" \
     "$OBJ_DIR/winevulkan_vulkan.o" "$OBJ_DIR/winevulkan_thunks.o" \
     "$OBJ_DIR/winegstreamer_unixlib.o" "$OBJ_DIR/wg_parser_apple_ios.o" \
-    "$OBJ_DIR/debug.o" "$OBJ_DIR/env.o" "$OBJ_DIR/file.o" \
+    "$OBJ_DIR/alpc.o" "$OBJ_DIR/debug.o" "$OBJ_DIR/env.o" "$OBJ_DIR/file.o" \
     "$OBJ_DIR/loader.o" "$OBJ_DIR/loadorder.o" "$OBJ_DIR/process.o" "$OBJ_DIR/registry.o" \
     "$OBJ_DIR/security.o" "$OBJ_DIR/serial.o" "$OBJ_DIR/server.o" \
     "$OBJ_DIR/signal_arm.o" "$OBJ_DIR/signal_arm64.o" "$OBJ_DIR/signal_i386.o" "$OBJ_DIR/signal_x86_64.o" \

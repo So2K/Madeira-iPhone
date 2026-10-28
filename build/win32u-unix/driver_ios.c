@@ -144,11 +144,11 @@ void winios_drv_post_mouse(int x, int y, unsigned int flags, unsigned int mouse_
      * which walks the desktop's children (where the game's window lives).
      * Passing the desktop handle goes through window_thread_from_point on
      * the detached desktop window and returns NULL, dropping the message.
-     * Call win32u's send_hardware_message directly (same library) instead
+     * Call win32u's server_send_hardware_message directly (same library) instead
      * of the NtUserCallHwndParam inline — we get the raw NTSTATUS and skip
      * a dispatch layer that can fail for its own reasons. */
     ios_foreground_if_none( "an injected mouse event" );
-    NTSTATUS st = send_hardware_message( NULL, 0, &input, 0 );
+    NTSTATUS st = server_send_hardware_message( NULL, 0, &input, 0 );
     {
         static unsigned cnt;
         if (cnt++ < 40)
@@ -232,7 +232,7 @@ void winios_drv_post_key(unsigned short vk, unsigned int flags)
     input.ki.dwExtraInfo = 0;
 
     ios_foreground_if_none( "an injected key" );
-    st = send_hardware_message( NULL, 0, &input, 0 );
+    st = server_send_hardware_message( NULL, 0, &input, 0 );
     {
         /* ml647: COUNT EVENTS, and never let a cap masquerade as absence. The
          * old "first 40 lines" cap was exhausted by arrow keys early in the
@@ -258,7 +258,7 @@ static void winios_text_key(unsigned short vk, unsigned int flags)
     input.ki.wVk = vk;
     input.ki.wScan = NtUserMapVirtualKeyEx( vk, MAPVK_VK_TO_VSC_EX, NtUserGetKeyboardLayout(0) ) & 0xff;
     input.ki.dwFlags = flags;
-    send_hardware_message( NULL, 0, &input, 0 );
+    server_send_hardware_message( NULL, 0, &input, 0 );
 }
 
 /* A complete pasted character is emitted on the Wine event-pump thread. */
@@ -294,9 +294,9 @@ void winios_drv_post_text(unsigned int scalar, unsigned short vk, int shift)
     {
         input.ki.wScan = units[i];
         input.ki.dwFlags = KEYEVENTF_UNICODE;
-        send_hardware_message( NULL, 0, &input, 0 );
+        server_send_hardware_message( NULL, 0, &input, 0 );
         input.ki.dwFlags |= KEYEVENTF_KEYUP;
-        send_hardware_message( NULL, 0, &input, 0 );
+        server_send_hardware_message( NULL, 0, &input, 0 );
     }
 }
 
