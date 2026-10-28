@@ -223,3 +223,6 @@ __pycache__/
 
 # Python host-check caches
 __pycache__/
+
+# Verified runtime component caches
+.runtime-cache/

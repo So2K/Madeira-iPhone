@@ -71,6 +71,7 @@ if command -v xcrun > /dev/null 2>&1 &&
 else
     echo "  helper kernels did not build -- what needs them is skipped"
     head -20 "$OUT/mad_kernels.err" 2> /dev/null || true
+    [ "${MADEIRA_REQUIRE_KERNELS:-0}" != 1 ] || exit 1
 fi
 
 echo "=== madeira_d3d12.dll (arm64ec) ==="

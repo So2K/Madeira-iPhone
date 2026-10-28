@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Exercise runtime cache boundaries, package completeness, and source isolation."""
+import importlib.util
+from itertools import product
+import json
+from pathlib import Path
+import shutil
+import struct
+import subprocess
+import tempfile
+import unittest
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('runtime', ROOT / 'tools/build/runtime-components.py')
+runtime = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runtime)
+
+
+def pe(machine):
+    data = bytearray(128)
+    data[:2] = b'MZ'
+    struct.pack_into('<I', data, 0x3c, 64)
+    data[64:68] = b'PE\0\0'
+    struct.pack_into('<H', data, 68, machine)
+    return bytes(data)
+
+
+def macho(platform=2):
+    return struct.pack('<8I6I', 0xfeedfacf, 0x100000c, 0, 6, 1, 24, 0, 0,
+                       0x32, 24, platform, 0, 0, 0)
+
+
+def fixture(path):
+    if path.endswith('.dylib'):
+        return macho()
+    if path.endswith(('.dll', '.exe')):
+        machine = 0xaa64 if path.startswith('aarch64-windows/') else 0x8664
+        return pe(machine)
+    return b'notice or version\n'
+
+
+class RuntimeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='madeira-runtime-')
+        self.root = Path(self.tmp.name)
+        self.previous = runtime.ROOT
+        runtime.ROOT = self.root
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        self.git('config', 'user.name', 'Runtime fixture')
+        self.git('config', 'user.email', 'runtime@example.invalid')
+        for name, entry in runtime.CONTRACT.items():
+            for path in entry['required']:
+                self.write('app/Madeira/' + path, fixture(path))
+        self.write('tools/build/runtime-components.py', b'coordinator')
+        self.write('build/madeira-dock/build.sh', b'dock recipe')
+        self.write('build/windows-runtime/build.sh', b'windows recipe')
+        self.write('build/moltenvk-ios/build.sh', b'moltenvk recipe')
+        self.write('build/mesa-ios/build.sh', b'zink recipe')
+        self.write('build/mesa-d3d12/build.sh', b'mesa d3d12 recipe')
+        self.write('build/dxvk/build.sh', b'vulkan recipe')
+        self.write('build/mesa-ios/build-kosmickrisp.sh', b'kosmic recipe')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'fixture')
+        sha = self.git('rev-parse', 'HEAD')
+        for pin in ['wine', 'FEX', 'dxmt', 'madeira-dock']:
+            self.git('update-index', '--add', '--cacheinfo', f'160000,{sha},{pin}')
+        self.git('commit', '-qm', 'pins')
+        self.sdk = 'sdk-fixture'
+
+    def tearDown(self):
+        runtime.ROOT = self.previous
+        self.tmp.cleanup()
+
+    def git(self, *args):
+        return subprocess.check_output(['git', '-C', str(self.root), *args], text=True).strip()
+
+    def write(self, path, data):
+        dest = self.root / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        return dest
+
+    def snapshots(self):
+        return {name: runtime.snapshot(name, self.sdk) for name in runtime.CONTRACT}
+
+    def ipa(self):
+        bundle = self.root / 'app/Madeira'
+        runtime.bundle_manifest(bundle, self.sdk)
+        for path in ['Madeira', 'Madeira.debug.dylib', 'prefix-template.tar.gz',
+                     'x86_64-vcruntime/vcruntime140.dll', 'i386-windows/ntdll.dll']:
+            self.write('app/Madeira/' + path, b'app fixture')
+        ipa = self.root / 'test.ipa'
+        with zipfile.ZipFile(ipa, 'w') as archive:
+            for path in bundle.rglob('*'):
+                if path.is_file():
+                    archive.write(path, 'Payload/Madeira.app/' + path.relative_to(bundle).as_posix())
+        return ipa
+
+    def test_cache_round_trip_and_dock_ownership(self):
+        snapshots = self.snapshots()
+        self.assertNotIn('arm64ec-windows/dockhost.exe', snapshots['windows']['files'])
+        for name in runtime.CONTRACT:
+            runtime.stage(name, self.sdk)
+        path = self.root / '.runtime-cache/dock/files/arm64ec-windows/dockhost.exe'
+        path.write_bytes(pe(0x8664) + b'corrupt')
+        original = (self.root / 'app/Madeira/arm64ec-windows/dockhost.exe').read_bytes()
+        with self.assertRaises(ValueError):
+            runtime.stage('dock', self.sdk)
+        self.assertEqual(original, (self.root / 'app/Madeira/arm64ec-windows/dockhost.exe').read_bytes())
+
+    def test_required_files_architecture_and_platform(self):
+        snapshots = self.snapshots()
+        bundle = self.root / 'app/Madeira'
+        for name, entry in runtime.CONTRACT.items():
+            for path in entry['required']:
+                file = bundle / path
+                data = file.read_bytes()
+                file.unlink()
+                with self.assertRaises(ValueError, msg=path):
+                    runtime.validate_manifest(name, snapshots[name], lambda p: runtime.read_regular(bundle, p), self.sdk)
+                file.write_bytes(data)
+        for path in ['arm64ec-windows/dockhost.exe', 'aarch64-windows/wow64.dll',
+                     'vulkan/arm64ec-windows/d3d12.dll', 'compat/love/lua51.dll']:
+            with self.assertRaises(ValueError):
+                runtime.check_binary(path, pe(0x14c))
+        for platform in [1, 7]:
+            with self.assertRaises(ValueError):
+                runtime.check_binary('gl/libOSMesa.dylib', macho(platform))
+        with self.assertRaises(ValueError):
+            runtime.check_binary('gl/libOSMesa.dylib', macho()[:40])
+
+    def test_unsafe_paths_unknown_owners_wrong_keys_and_symlinks(self):
+        snapshot = runtime.snapshot('dock', self.sdk)
+        bundle = self.root / 'app/Madeira'
+        for path in ['../escape', '/absolute', 'arm64ec-windows/../escape', 'a\\b', '']:
+            with self.assertRaises(ValueError):
+                runtime.safe_path(path)
+        for key, value in [('key', 'wrong'), ('schema', 99), ('files', {})]:
+            broken = dict(snapshot, **{key: value})
+            with self.assertRaises(ValueError):
+                runtime.validate_manifest('dock', broken, lambda p: runtime.read_regular(bundle, p), self.sdk)
+        extra = dict(snapshot, files=dict(snapshot['files'], **{'other/file': 'ignored'}))
+        with self.assertRaises(ValueError):
+            runtime.validate_manifest('dock', extra, lambda p: b'notice', self.sdk)
+        path = bundle / 'arm64ec-windows/dockhost.exe'
+        outside = self.write('outside.exe', path.read_bytes())
+        path.unlink()
+        path.symlink_to(outside)
+        with self.assertRaises(ValueError):
+            runtime.stage('dock', self.sdk)
+
+    def test_package_completeness_source_and_corruption(self):
+        self.snapshots()
+        ipa = self.ipa()
+        runtime.validate_ipa(ipa, self.sdk)
+        with zipfile.ZipFile(ipa) as archive:
+            original = {p: archive.read(p) for p in archive.namelist()}
+        for name, entry in runtime.CONTRACT.items():
+            for path in entry['required']:
+                with zipfile.ZipFile(ipa, 'w') as archive:
+                    for filename, data in original.items():
+                        if filename != 'Payload/Madeira.app/' + path:
+                            archive.writestr(filename, data)
+                with self.assertRaises(KeyError, msg=path):
+                    runtime.validate_ipa(ipa, self.sdk)
+        with zipfile.ZipFile(ipa, 'w') as archive:
+            for filename, data in original.items():
+                archive.writestr(filename, data)
+            archive.writestr('../escape', b'bad')
+        with self.assertRaises(ValueError):
+            runtime.validate_ipa(ipa, self.sdk)
+        with zipfile.ZipFile(ipa, 'w') as archive:
+            archive.writestr('Payload/Madeira.app/Madeira', b'incomplete old CI IPA')
+        with self.assertRaises(KeyError):
+            runtime.validate_ipa(ipa, self.sdk)
+
+    def test_all_source_change_permutations(self):
+        recipes = [('build/madeira-dock/build.sh', {'dock'}),
+                   ('build/windows-runtime/build.sh', {'windows'}),
+                   ('build/moltenvk-ios/build.sh', {'moltenvk', 'zink'}),
+                   ('build/mesa-ios/build.sh', {'zink'}),
+                   ('build/mesa-d3d12/build.sh', {'mesa-d3d12'}),
+                   ('build/dxvk/build.sh', {'vulkan-pe'}),
+                   ('build/mesa-ios/build-kosmickrisp.sh', {'kosmickrisp'})]
+        keys = {n: runtime.input_key(n, self.sdk) for n in runtime.CONTRACT}
+        contents = {p: (self.root / p).read_bytes() for p, _ in recipes}
+        for selected in product([False, True], repeat=len(recipes)):
+            changed = set()
+            for enabled, (path, affected) in zip(selected, recipes):
+                (self.root / path).write_bytes(contents[path] + (b' changed' if enabled else b''))
+                if enabled:
+                    changed |= affected
+            actual = {n for n in keys if runtime.input_key(n, self.sdk) != keys[n]}
+            self.assertEqual(changed, actual, selected)
+        for path, data in contents.items():
+            (self.root / path).write_bytes(data)
+        self.write('app/Madeira/Library.swift', b'app-only change')
+        self.assertEqual(keys, {n: runtime.input_key(n, self.sdk) for n in keys})
+        for name in keys:
+            self.assertNotEqual(keys[name], runtime.input_key(name, 'different-sdk'))
+
+
+if __name__ == '__main__':
+    unittest.main()
