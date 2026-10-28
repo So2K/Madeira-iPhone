@@ -13,8 +13,6 @@ DXMT = {'d3d9.dll', 'd3d9shim.dll', 'd3d9-emulated.dll', 'd3d10core.dll',
         'd3d11.dll', 'dxgi.dll', 'winemetal.dll', 'nvapi64.dll'}
 CUSTOM = {'faultrep.dll', 'madeira_d3d12.dll', 'xtajit64.dll', 'xtajit.dll',
           'dockhost.exe', 'dock-notices.txt', 'wineios.drv', 'tftrace-x64.dll'}
-# Madeira builds its own audio stub and diagnostic DLL after Wine.
-VERSIONED = set()
 
 
 def targets(arch, names=None):
@@ -29,7 +27,7 @@ def targets(arch, names=None):
     for dest in sorted(farm.iterdir() if names is None else (farm / name for name in names)):
         name = dest.name.lower()
         dxmt = DXMT if arch == 'arm64ec' else {'d3d11.dll', 'dxgi.dll', 'winemetal.dll'}
-        if name in dxmt | CUSTOM | VERSIONED or (arch == 'arm64ec' and name in {'d3d12.dll', 'd3d12core.dll'}):
+        if name in dxmt | CUSTOM or (arch == 'arm64ec' and name in {'d3d12.dll', 'd3d12core.dll'}):
             continue
         source = 'd3d9.dll' if name == 'd3d9-wined3d.dll' else name
         if source not in modules:

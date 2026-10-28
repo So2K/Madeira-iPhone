@@ -31,7 +31,7 @@ for arch in arm64ec aarch64; do
             --cross-file "$X" --native-file "$R/dxmt/build-osx.txt" --buildtype release \
             -Dwine_build_path="$W" -Dwine_builtin_dll=true -Denable_nvapi=true
     fi
-    SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" meson compile -C "$B"
+    SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" meson compile -C "$B" -j "$JOBS"
     DEST="$R/app/Madeira/$arch-windows"
     for m in d3d11/d3d11.dll dxgi/dxgi.dll d3d10/d3d10core.dll winemetal/winemetal.dll; do
         # The existing aarch64 farm uses Wine's D3D10 core and D3D9 frontend.
@@ -39,8 +39,7 @@ for arch in arm64ec aarch64; do
         "$TC/$arch-w64-mingw32-strip" --strip-debug -o "$DEST/$(basename "$m")" "$B/src/$m"
     done
     if [ "$arch" = arm64ec ]; then
-        for pair in 'd3d9shim/d3d9shim.dll:d3d9.dll' 'd3d9shim/d3d9shim.dll:d3d9shim.dll' \
-                    'd3d9/d3d9.dll:d3d9-emulated.dll' 'nvapi/nvapi64.dll:nvapi64.dll'; do
+        for pair in 'd3d9/d3d9.dll:d3d9.dll' 'nvapi/nvapi64.dll:nvapi64.dll'; do
             "$TC/$arch-w64-mingw32-strip" --strip-debug -o "$DEST/${pair#*:}" "$B/src/${pair%:*}"
         done
     fi

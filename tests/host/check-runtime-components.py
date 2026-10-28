@@ -166,6 +166,24 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runtime.check_binary('gl/libOSMesa.dylib', macho()[:40])
 
+    def test_partial_fex_configure_is_retried(self):
+        for arch, target, dll in [('arm64ec', 'arm64ecfex', 'libarm64ecfex.dll'),
+                                  ('wow64', 'wow64fex', 'libwow64fex.dll')]:
+            relative = f'build/fex-{arch}/build.sh'
+            script = self.write(relative, (ROOT / relative).read_bytes())
+            self.write(f'FEX/build-{arch}/CMakeCache.txt', b'partial configure')
+            binary = self.root / f'FEX/build-{arch}/Bin/{dll}'
+            cmake = self.write('bin/cmake', b'#!/bin/sh\nset -eu\n'
+                b'if [ "$1" = -S ]; then touch "$CONFIGURED"; '
+                b'else test -f "$CONFIGURED"; mkdir -p "$(dirname "$BINARY")"; echo binary > "$BINARY"; fi\n')
+            cmake.chmod(0o755)
+            (self.root / 'app/Madeira/aarch64-windows').mkdir(parents=True, exist_ok=True)
+            subprocess.run(['bash', str(script)], cwd=self.root,
+                           env=dict(os.environ, PATH=str(cmake.parent) + os.pathsep + os.environ['PATH'],
+                                    CONFIGURED=str(self.root / f'{arch}.configured'), BINARY=str(binary)),
+                           check=True, capture_output=True)
+            self.assertTrue(binary.is_file())
+
     def test_wine_temporary_edits_preserve_local_source_on_failure(self):
         script = self.write('build/wine-pe/build-modules.sh',
                             (ROOT / 'build/wine-pe/build-modules.sh').read_bytes())
