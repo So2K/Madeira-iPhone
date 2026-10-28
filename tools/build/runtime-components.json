@@ -4,7 +4,6 @@
       "madeira-dock"
     ],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/madeira-dock/**",
       "tools/build/setup-llvm-mingw.sh",
@@ -26,7 +25,6 @@
       "dxmt"
     ],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/windows-runtime/**",
       "build/wine-pe/**",
@@ -101,7 +99,6 @@
   "moltenvk": {
     "pins": [],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/moltenvk-ios/**",
       "tools/build/prepare-graphics.sh",
@@ -125,7 +122,6 @@
   "zink": {
     "pins": [],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/mesa-ios/build.sh",
       "build/mesa-ios/ios-arm64.cross",
@@ -146,7 +142,6 @@
   "mesa-d3d12": {
     "pins": [],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/mesa-d3d12/**",
       "tools/build/setup-llvm-mingw.sh",
@@ -167,7 +162,6 @@
   "vulkan-pe": {
     "pins": [],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/dxvk/**",
       "build/vkd3d-proton/**",
@@ -199,7 +193,6 @@
   "kosmickrisp": {
     "pins": [],
     "inputs": [
-      "tools/build/runtime-components.py",
       "tools/build/runtime-components.json",
       "build/mesa-ios/build-kosmickrisp.sh",
       "build/mesa-ios/kosmickrisp-ios-arm64.cross",

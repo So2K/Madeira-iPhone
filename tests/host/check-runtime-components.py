@@ -238,6 +238,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(changed, actual, selected)
         for path, data in contents.items():
             (self.root / path).write_bytes(data)
+        self.write('tools/build/runtime-components.py', b'validation-only change')
         self.write('app/Madeira/Library.swift', b'app-only change')
         self.assertEqual(keys, {n: runtime.input_key(n, self.sdk) for n in keys})
         for name in keys:
