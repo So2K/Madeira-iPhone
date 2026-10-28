@@ -34,7 +34,7 @@ def macho(platform=2):
 def fixture(path):
     if path.endswith('.dylib'):
         return macho()
-    if path.endswith(('.dll', '.exe')):
+    if path.endswith(('.dll', '.exe', '.drv')):
         machine = 0xaa64 if path.startswith('aarch64-windows/') else 0x8664
         return pe(machine)
     return b'notice or version\n'

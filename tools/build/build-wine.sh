@@ -16,7 +16,8 @@ if [[ ! -f "$WINE/build-macos/Makefile" ]]; then
   mkdir -p "$WINE/build-macos"
   (
     cd "$WINE/build-macos"
-    ../configure --enable-archs=aarch64 --disable-tests
+    ../configure --enable-archs=aarch64 --disable-tests --without-x \
+      --without-freetype --without-gnutls --enable-winegstreamer
   )
 fi
 
@@ -33,7 +34,8 @@ if [[ ! -f "$WINE/build-arm64ec/Makefile" ]]; then
   mkdir -p "$WINE/build-arm64ec"
   (
     cd "$WINE/build-arm64ec"
-    ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer
+    ../configure --enable-archs=arm64ec --without-x --disable-tests \
+      --without-freetype --without-gnutls --enable-winegstreamer
   )
 fi
 

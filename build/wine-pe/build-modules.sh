@@ -120,7 +120,7 @@ for m in "$@"; do
 done
 
 if [ ! -f "$B/config.status" ]; then
-    mkdir -p "$B" && (cd "$B" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer)
+    mkdir -p "$B" && (cd "$B" && ../configure --enable-archs=arm64ec --without-x --disable-tests --without-freetype --without-gnutls --enable-winegstreamer)
 fi
 # widl looks for stdole2.tlb under aarch64-windows/ when it builds an ARM64EC
 # typelib import (shell32 and others); this tree builds it into arm64ec-windows/.

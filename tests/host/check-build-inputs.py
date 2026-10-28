@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='madeira-build-inputs-') as folder:
                SDK_INPUT=str(sdk), CLANG_INPUT=str(clang), RUST_INPUT=str(rust), GITHUB_OUTPUT=str(output),
                REPO_INPUT=str(root), GIT_INPUT=shutil.which('git'))
     native_flags = ('CC', 'CXX', 'AR', 'RANLIB', 'CFLAGS', 'CXXFLAGS', 'CPPFLAGS', 'LDFLAGS',
-                    'SDKROOT', 'MACOSX_DEPLOYMENT_TARGET', 'IPHONEOS_DEPLOYMENT_TARGET', 'ImageOS', 'ImageVersion')
+                    'SDKROOT', 'MACOSX_DEPLOYMENT_TARGET', 'IPHONEOS_DEPLOYMENT_TARGET', 'ImageOS')
     rust_flags = ('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTUP_TOOLCHAIN')
     graphics_flags = ('DXMT_METAL_STD', 'MADEIRA_ONLY', 'MADEIRA_MSC_ROOT')
     app_flags = ('CONFIGURATION', 'MADEIRA_MOLTENVK')
@@ -57,6 +57,7 @@ with tempfile.TemporaryDirectory(prefix='madeira-build-inputs-') as folder:
     first = fingerprint()
     assert first == fingerprint()
     assert first == fingerprint({'JOBS': '3'})
+    assert first == fingerprint({'ImageVersion': 'different fleet image'}), 'runner rollout metadata is not an SDK change'
     sdk.write_text('27.2\n')
     assert first != fingerprint()
     sdk.write_text('27.1\n')
