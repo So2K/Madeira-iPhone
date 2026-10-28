@@ -44,10 +44,10 @@ def input_key(name, sdk):
     if name == 'windows':
         # The inventory selects Wine targets. Test fixtures and the iOS driver
         # stub remain versioned inputs, even when there is no upstream PE target.
-        for p in paths:
-            if p.startswith(('app/Madeira/arm64ec-windows/', 'app/Madeira/aarch64-windows/')) and (p.endswith('.exe') or p.endswith(('wineios.drv', 'tftrace-x64.dll'))):
-                inputs[p] = digest((ROOT / p).read_bytes())
-        inputs['farm-inventory'] = digest('\n'.join(p for p in paths if p.startswith(
+        for p in spec['prebuilt']:
+            inputs[p] = digest((ROOT / 'app/Madeira' / p).read_bytes())
+        tracked = git('ls-files').splitlines()
+        inputs['farm-inventory'] = digest('\n'.join(p for p in tracked if p.startswith(
             ('app/Madeira/arm64ec-windows/', 'app/Madeira/aarch64-windows/'))).encode())
     return digest(json.dumps([sdk, spec, inputs, pins], sort_keys=True).encode())
 
@@ -231,6 +231,8 @@ def main():
     parser.add_argument('target', nargs='?')
     args = parser.parse_args()
     sdk = sdk_key()
+    if args.target not in (None, 'all') and args.action not in ('ipa', 'bundle') and args.target not in CONTRACT:
+        parser.error('unknown runtime component: ' + args.target)
     if args.action == 'ipa':
         validate_ipa(Path(args.target), sdk)
     elif args.action == 'bundle':

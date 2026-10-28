@@ -50,7 +50,7 @@ class RuntimeTests(unittest.TestCase):
         self.git('config', 'user.name', 'Runtime fixture')
         self.git('config', 'user.email', 'runtime@example.invalid')
         for name, entry in runtime.CONTRACT.items():
-            for path in entry['required']:
+            for path in entry['required'] + entry.get('prebuilt', []):
                 self.write('app/Madeira/' + path, fixture(path))
         self.write('tools/build/runtime-components.py', b'coordinator')
         self.write('build/madeira-dock/build.sh', b'dock recipe')
@@ -129,6 +129,15 @@ class RuntimeTests(unittest.TestCase):
                 runtime.check_binary('gl/libOSMesa.dylib', macho(platform))
         with self.assertRaises(ValueError):
             runtime.check_binary('gl/libOSMesa.dylib', macho()[:40])
+
+    def test_rebuilt_outputs_do_not_change_source_key(self):
+        before = runtime.input_key('windows', self.sdk)
+        self.write('app/Madeira/aarch64-windows/clock.exe', pe(0xaa64) + b'rebuilt')
+        self.write('app/Madeira/arm64ec-windows/kernelbase.dll', pe(0x8664) + b'rebuilt')
+        self.assertEqual(before, runtime.input_key('windows', self.sdk))
+        fixture_path = runtime.CONTRACT['windows']['prebuilt'][0]
+        self.write('app/Madeira/' + fixture_path, fixture(fixture_path) + b'changed fixture')
+        self.assertNotEqual(before, runtime.input_key('windows', self.sdk))
 
     def test_unsafe_paths_unknown_owners_wrong_keys_and_symlinks(self):
         snapshot = runtime.snapshot('dock', self.sdk)

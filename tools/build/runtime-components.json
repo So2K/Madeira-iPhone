@@ -70,6 +70,32 @@
       "vulkan/arm64ec-windows/vulkan-1.dll",
       "compat/love/lua51.dll",
       "licenses/LuaJIT-MIT.txt"
+    ],
+    "prebuilt": [
+      "aarch64-windows/child-test.exe",
+      "aarch64-windows/cube.exe",
+      "aarch64-windows/proc-test.exe",
+      "aarch64-windows/texquad.exe",
+      "aarch64-windows/triangle.exe",
+      "aarch64-windows/winhttp-test.exe",
+      "arm64ec-windows/calltest-x64.exe",
+      "arm64ec-windows/child-test-x64.exe",
+      "arm64ec-windows/clocktest-x64.exe",
+      "arm64ec-windows/cube-x64.exe",
+      "arm64ec-windows/d3d12-cube-x64.exe",
+      "arm64ec-windows/d3d12-m2-x64.exe",
+      "arm64ec-windows/d3d12-vfetch-x64.exe",
+      "arm64ec-windows/dxchkmsaa-x64.exe",
+      "arm64ec-windows/fib-x64.exe",
+      "arm64ec-windows/fib2-x64.exe",
+      "arm64ec-windows/fib3-x64.exe",
+      "arm64ec-windows/fileio-x64.exe",
+      "arm64ec-windows/fpconf-x64.exe",
+      "arm64ec-windows/heap-x64.exe",
+      "arm64ec-windows/hello-x64.exe",
+      "arm64ec-windows/proc-test-x64.exe",
+      "arm64ec-windows/tftrace-x64.dll",
+      "arm64ec-windows/wineios.drv"
     ]
   },
   "moltenvk": {
