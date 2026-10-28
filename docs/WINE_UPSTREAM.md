@@ -29,6 +29,10 @@ compile every source again to prevent protocol mixing with an old archive.
 The ntdll build stops before packaging if any source fails to compile. Keep
 the ulock fallback before iOS 17.4 and the pipe/fcntl fallback on iOS.
 
+Remove 19 old ARM64EC DLL copies whose Wine 11.20 Makefiles now enable only
+i386. The CI build still builds their supported 32-bit versions. The 64-bit
+package must not retain DLLs from the older Wine revision.
+
 ## Checks performed
 
 With Xcode 27.1, the iPhoneOS 27.1 SDK and iOS 17 deployment target:
@@ -54,7 +58,7 @@ Rebuild and package all shipped Wine PE modules from this exact Wine revision,
 including aarch64 WoW64 support and all x86 DLLs. Rebuild the matching DXMT
 integration against the changed Wine interfaces. Run the full app link and
 package checks. Do not combine the new native archives with the tracked old DLL
-package. Generated archives and DLL binaries are not changed in this source PR.
+package. CI produces the matching DLL package; native archives are not checked in.
 
 No current iPad, GPU, gameplay, standalone or LiveContainer run has been
 performed for this update. Check those paths before marking the drafts ready.
