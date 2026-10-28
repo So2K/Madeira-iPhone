@@ -17,7 +17,11 @@ mkdir -p "$OUT"
 # the vtables the wrong length.
 python3 "$SRC/gen_vtables.py" \
     "$REPO_ROOT/toolchains/llvm-mingw-20260421-ucrt-macos-universal/generic-w64-mingw32/include/d3d12.h" \
-    "$SRC/madeira_d3d12_stubs.h" >/dev/null
+    "$OUT/madeira_d3d12_stubs.h" >/dev/null
+cmp -s "$OUT/madeira_d3d12_stubs.h" "$SRC/madeira_d3d12_stubs.h" || {
+    echo "D3D12 stubs differ from the pinned headers; regenerate and review the source header" >&2
+    exit 1
+}
 
 # Build-time inputs of madeira_d3d12.c, all optional: without them the runtime
 # falls back as noted below.
