@@ -48,6 +48,12 @@ done
 "$R/build/fex-arm64ec/build.sh"
 "$R/build/fex-wow64/build.sh"
 "$R/build/faultrep/build.sh"
+"$TC/arm64ec-w64-mingw32-clang" -shared -O2 \
+    -Wl,--no-insert-timestamp \
+    -o "$R/app/Madeira/arm64ec-windows/wineios.drv" "$R/build/wineios-drv/wineios.c"
+"$TC/x86_64-w64-mingw32-clang" -shared -O2 -nostdlib -fno-stack-protector \
+    -Wl,--entry,DllMainCRTStartup,--no-insert-timestamp \
+    -o "$R/app/Madeira/arm64ec-windows/tftrace-x64.dll" "$R/build/tftrace/tftrace-x64.c" -lkernel32
 MADEIRA_REQUIRE_KERNELS=1 "$R/build/madeira-d3d12/build-pe.sh"
 for dll in madeira_d3d12 d3d12 d3d12core; do
     cp "$R/build/madeira-d3d12/out-pe/$dll.dll" "$R/app/Madeira/arm64ec-windows/$dll.dll"
@@ -62,3 +68,5 @@ if [ ! -d "$LUA/.git" ]; then
 fi
 [ "$(git -C "$LUA" rev-parse HEAD)" = a4c064539ea931274d407e1249b4bb575424a0f4 ] || exit 1
 LUAJIT_SRC="$LUA" "$R/build/luajit-x64/build.sh"
+
+python3 "$R/build/windows-runtime/targets.py" closure

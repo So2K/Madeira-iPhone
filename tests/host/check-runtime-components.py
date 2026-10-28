@@ -19,12 +19,22 @@ runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
 
 
-def pe(machine):
-    data = bytearray(128)
+def pe(machine, imports=()):
+    data = bytearray(1024)
     data[:2] = b'MZ'
     struct.pack_into('<I', data, 0x3c, 64)
     data[64:68] = b'PE\0\0'
-    struct.pack_into('<H', data, 68, machine)
+    struct.pack_into('<HH', data, 68, machine, 1)
+    struct.pack_into('<HH', data, 84, 240, 0x2000)
+    struct.pack_into('<H', data, 88, 0x20b)
+    struct.pack_into('<I', data, 88 + 108, 16)
+    struct.pack_into('<IIII', data, 88 + 240 + 8, 512, 0x1000, 512, 512)
+    if imports:
+        struct.pack_into('<II', data, 88 + 112 + 8, 0x1000, (len(imports) + 1) * 20)
+        for index, name in enumerate(imports):
+            offset = 256 + index * 64
+            struct.pack_into('<I', data, 512 + index * 20 + 12, 0x1000 + offset)
+            data[512 + offset:512 + offset + len(name) + 1] = name.encode() + b'\0'
     return bytes(data)
 
 
@@ -55,6 +65,7 @@ class RuntimeTests(unittest.TestCase):
             for path in entry['required'] + entry.get('prebuilt', []):
                 self.write('app/Madeira/' + path, fixture(path))
         self.write('tools/build/runtime-components.py', b'coordinator')
+        self.write('tools/check-wine-media-dlls.py', (ROOT / 'tools/check-wine-media-dlls.py').read_bytes())
         self.write('build/madeira-dock/build.sh', b'dock recipe')
         self.write('build/windows-runtime/build.sh', b'windows recipe')
         self.write('build/moltenvk-ios/build.sh', b'moltenvk recipe')
@@ -98,6 +109,16 @@ class RuntimeTests(unittest.TestCase):
                 if path.is_file():
                     archive.write(path, 'Payload/Madeira.app/' + path.relative_to(bundle).as_posix())
         return ipa
+
+    def test_missing_runtime_imports_are_rejected(self):
+        files = {'caller.dll': pe(0x8664, ['needed.dll']), 'apisetschema.dll': pe(0x8664)}
+        self.assertEqual(runtime.missing_imports(files), {'needed.dll'})
+        files['needed.dll'] = pe(0x8664)
+        self.assertEqual(runtime.missing_imports(files), set())
+        files['caller.dll'] = pe(0x8664, ['api-ms-win-example.dll'])
+        self.assertEqual(runtime.missing_imports(files), set())
+        del files['apisetschema.dll']
+        self.assertEqual(runtime.missing_imports(files), {'api-ms-win-example.dll'})
 
     def test_cache_round_trip_and_dock_ownership(self):
         snapshots = self.snapshots()
@@ -172,6 +193,27 @@ class RuntimeTests(unittest.TestCase):
         fixture_path = runtime.CONTRACT['windows']['prebuilt'][0]
         self.write('app/Madeira/' + fixture_path, fixture(fixture_path) + b'changed fixture')
         self.assertNotEqual(before, runtime.input_key('windows', self.sdk))
+
+    def test_native_dependency_and_command_bounds(self):
+        for dependency, valid in [('/opt/homebrew/lib/libhost.dylib', False),
+                                  ('@rpath/libmissing.dylib', False),
+                                  ('/usr/lib/libSystem.B.dylib', True),
+                                  ('@rpath/libMoltenVK.dylib', True)]:
+            name = dependency.encode() + b'\0'
+            length = (24 + len(name) + 7) // 8 * 8
+            command = struct.pack('<6I', 0xc, length, 24, 0, 0, 0) + name
+            data = bytearray(macho())
+            struct.pack_into('<II', data, 16, 2, 24 + length)
+            data += command.ljust(length, b'\0')
+            if valid:
+                runtime.check_binary('gl/libOSMesa.dylib', bytes(data))
+            else:
+                with self.assertRaises(ValueError):
+                    runtime.check_binary('gl/libOSMesa.dylib', bytes(data))
+        data = bytearray(macho())
+        struct.pack_into('<I', data, 16, 2)
+        with self.assertRaises(ValueError):
+            runtime.check_binary('gl/libOSMesa.dylib', bytes(data))
 
     def test_unsafe_paths_unknown_owners_wrong_keys_and_symlinks(self):
         snapshot = runtime.snapshot('dock', self.sdk)

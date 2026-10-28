@@ -3,6 +3,7 @@
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -42,8 +43,8 @@ def input_key(name, sdk):
               and any(fnmatch.fnmatchcase(p, pattern) for pattern in spec['inputs'])}
     pins = {p: git('rev-parse', f'HEAD:{p}') for p in spec['pins']}
     if name == 'windows':
-        # The inventory selects Wine targets. Test fixtures and the iOS driver
-        # stub remain versioned inputs, even when there is no upstream PE target.
+        # The inventory selects Wine targets. Diagnostic test programs remain
+        # versioned inputs rather than part of the production DLL rebuild.
         for p in spec['prebuilt']:
             inputs[p] = digest((ROOT / 'app/Madeira' / p).read_bytes())
         tracked = git('ls-files').splitlines()
@@ -92,13 +93,30 @@ def check_binary(path, data):
         if len(data) < 32 or struct.unpack_from('<II', data) != (0xfeedfacf, 0x100000c):
             raise ValueError(f'not an arm64 Mach-O dylib: {path}')
         ncmds, size = struct.unpack_from('<II', data, 16)
+        if struct.unpack_from('<I', data, 12)[0] != 6:
+            raise ValueError(f'not a Mach-O dynamic library: {path}')
         if size > len(data) - 32:
             raise ValueError(f'invalid Mach-O commands: {path}')
         offset, ios = 32, False
         for _ in range(ncmds):
+            if offset + 8 > 32 + size:
+                raise ValueError(f'truncated Mach-O command: {path}')
             cmd, length = struct.unpack_from('<II', data, offset)
             if length < 8 or offset + length > 32 + size:
                 raise ValueError(f'invalid Mach-O command: {path}')
+            if cmd in (0xc, 0x80000018, 0x8000001f, 0x80000023):
+                if length < 24:
+                    raise ValueError(f'truncated dylib dependency: {path}')
+                start = struct.unpack_from('<I', data, offset + 8)[0]
+                end = data.find(b'\0', offset + start, offset + length)
+                if start < 24 or start >= length or end < 0:
+                    raise ValueError(f'invalid dylib dependency: {path}')
+                dependency = data[offset + start:end].decode('utf-8')
+                bundled = {PurePosixPath(p).name for spec in CONTRACT.values() for p in spec['required']}
+                if not dependency.startswith(('/usr/lib/', '/System/Library/')) and not (
+                    dependency.startswith(('@rpath/', '@loader_path/')) and PurePosixPath(dependency).name in bundled
+                ):
+                    raise ValueError(f'unbundled dylib dependency {dependency}: {path}')
             if cmd == 0x32 and length >= 24:
                 ios = struct.unpack_from('<I', data, offset + 8)[0] == 2
             elif cmd == 0x25:  # LC_VERSION_MIN_IPHONEOS, used by older recipes
@@ -106,6 +124,21 @@ def check_binary(path, data):
             offset += length
         if not ios:
             raise ValueError(f'not built for an iOS device: {path}')
+
+
+def missing_imports(files):
+    spec = importlib.util.spec_from_file_location('wine_pe', ROOT / 'tools/check-wine-media-dlls.py')
+    reader = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader)
+    missing = set()
+    for path, data in files.items():
+        if data[:2] != b'MZ':
+            continue
+        pe = reader.PE(data, machines=(0x8664, 0xa641, 0xa64e, 0xaa64), require_dll=False)
+        for dep in pe.imports() | pe.imports(delayed=True):
+            if dep not in files and not (dep.startswith(('api-ms-', 'ext-ms-')) and 'apisetschema.dll' in files):
+                missing.add(dep)
+    return missing
 
 
 def validate_manifest(name, manifest, read, sdk):
@@ -118,6 +151,7 @@ def validate_manifest(name, manifest, read, sdk):
                      if owns(name, p.removeprefix('app/Madeira/'))}
     if not isinstance(files, dict) or not required <= files.keys():
         raise ValueError(f'{name}: required runtime files are missing')
+    farms = {'arm64ec-windows': {}, 'aarch64-windows': {}}
     for path, sha in files.items():
         safe_path(path)
         if not owns(name, path):
@@ -126,6 +160,14 @@ def validate_manifest(name, manifest, read, sdk):
         check_binary(path, data)
         if digest(data) != sha:
             raise ValueError(f'{name}: runtime checksum mismatch: {path}')
+        folder = str(PurePosixPath(path).parent)
+        if name == 'windows' and folder in farms:
+            farms[folder][PurePosixPath(path).name.lower()] = data
+    if name == 'windows':
+        for folder, contents in farms.items():
+            missing = missing_imports(contents)
+            if missing:
+                raise ValueError(f'{folder}: missing imported DLLs: {sorted(missing)}')
 
 
 def read_regular(base, path):

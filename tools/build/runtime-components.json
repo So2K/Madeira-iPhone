@@ -42,7 +42,10 @@
       "build/dxmt-ios/build.sh",
       "madeira-d3d12/third_party/**",
       "app/Madeira/d3d12/**",
-      "tools/build/build-runtime-component.sh"
+      "tools/build/build-runtime-component.sh",
+      "tools/check-wine-media-dlls.py",
+      "build/wineios-drv/**",
+      "build/tftrace/*.c"
     ],
     "outputs": [
       "arm64ec-windows/*",
@@ -67,7 +70,9 @@
       "vulkan/arm64ec-windows/winevulkan.dll",
       "vulkan/arm64ec-windows/vulkan-1.dll",
       "compat/love/lua51.dll",
-      "licenses/LuaJIT-MIT.txt"
+      "licenses/LuaJIT-MIT.txt",
+      "arm64ec-windows/wineios.drv",
+      "arm64ec-windows/tftrace-x64.dll"
     ],
     "prebuilt": [
       "aarch64-windows/child-test.exe",
@@ -91,9 +96,7 @@
       "arm64ec-windows/fpconf-x64.exe",
       "arm64ec-windows/heap-x64.exe",
       "arm64ec-windows/hello-x64.exe",
-      "arm64ec-windows/proc-test-x64.exe",
-      "arm64ec-windows/tftrace-x64.dll",
-      "arm64ec-windows/wineios.drv"
+      "arm64ec-windows/proc-test-x64.exe"
     ]
   },
   "moltenvk": {
