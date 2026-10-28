@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import os
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,11 @@ def targets(arch, names=None):
                 modules[match[1].lower()] = (makefile.parent.name, category, match[1])
     result = []
     farm = ROOT / f'app/Madeira/{arch}-windows'
-    for dest in sorted(farm.iterdir() if names is None else (farm / name for name in names)):
+    if names is None:
+        required = json.loads((ROOT / 'tools/build/runtime-components.json').read_text())['windows']['required']
+        names = {p.name for p in farm.iterdir()} | {
+            Path(p).name for p in required if p.startswith(f'{arch}-windows/')}
+    for dest in sorted(farm / name for name in names):
         name = dest.name.lower()
         dxmt = DXMT if arch == 'arm64ec' else {'d3d11.dll', 'dxgi.dll', 'winemetal.dll'}
         if name in dxmt | CUSTOM or (arch == 'arm64ec' and name in {'d3d12.dll', 'd3d12core.dll'}):

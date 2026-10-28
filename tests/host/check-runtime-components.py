@@ -120,6 +120,24 @@ class RuntimeTests(unittest.TestCase):
         del files['apisetschema.dll']
         self.assertEqual(runtime.missing_imports(files), {'api-ms-win-example.dll'})
 
+    def test_wine_targets_include_required_dlls_absent_from_old_farms(self):
+        spec = importlib.util.spec_from_file_location('targets', ROOT / 'build/windows-runtime/targets.py')
+        targets = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(targets)
+        targets.ROOT = self.root
+        self.write('tools/build/runtime-components.json',
+                   (ROOT / 'tools/build/runtime-components.json').read_bytes())
+        for name in ['ntdll', 'kernelbase', 'explorerframe', 'wow64', 'wow64win']:
+            self.write(f'wine/dlls/{name}/Makefile.in', f'MODULE = {name}.dll\n'.encode())
+        (self.root / 'app/Madeira/arm64ec-windows/explorerframe.dll').unlink()
+        self.assertIn(('dlls/explorerframe/arm64ec-windows/explorerframe.dll',
+                       'explorerframe.dll', 'explorerframe'), targets.targets('arm64ec'))
+        selected = targets.targets('arm64ec', {'kernelbase.dll'})
+        self.assertEqual([name for _, name, _ in selected], ['kernelbase.dll'])
+        (self.root / 'wine/dlls/explorerframe/Makefile.in').unlink()
+        with self.assertRaises(ValueError):
+            targets.targets('arm64ec')
+
     def test_cache_round_trip_and_dock_ownership(self):
         snapshots = self.snapshots()
         self.assertNotIn('arm64ec-windows/dockhost.exe', snapshots['windows']['files'])
