@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "source_base_commit": "f6e9d8a55559e5d47754b048b9b78212124b4501",
+  "reference_build_commit": "bfaa84b8e5c7fe675bff70b200e869849020d529",
+  "wine_gitlink": "df1c5ea51e194937ac204bc3120922dc56a61bec",
+  "builder_sha256": "31bada625323d912aca63b6351b0d836d22d645a11cf162308cb10b84c6f60fb",
+  "setup_sha256": "d277537c15e5ae35f730a24cdf6bf8d9af5e8e56899f2eef5d4a8e5aa6b5e87c",
+  "ucrt_makefile_sha256": "e85ee5bb82fabdb42c9972666ae91d7d4d9d5c2d023014a34feb9cb98f96a68c",
+  "toolchain_name": "llvm-mingw-20260421-ucrt-macos-universal",
+  "toolchain_files": {
+    "bin/clang-22": {
+      "sha256": "2d6ac7a1d7a2cb022662b2243859c82cb68ed3691b387eb98a2b68a3d2f89616",
+      "bytes": 289320
+    },
+    "bin/ld.lld": {
+      "sha256": "117357c987f9729429b07c7c8ad0fc059fa9973cbed1ad1bb557774854b8a8fa",
+      "bytes": 10539824
+    },
+    "bin/llvm-objcopy": {
+      "sha256": "107fd8c5a585243765cb78bd2ecf1d9e8a56ee4dbfd64ba1ea45652d7c83686e",
+      "bytes": 409216
+    },
+    "bin/arm64ec-w64-mingw32-clang": {
+      "sha256": "c9b86311ade81d53235c93fafabdf98328d094de344ea9a9038e0dab6695ee9f",
+      "bytes": 2988
+    },
+    "bin/arm64ec-w64-windows-gnu.cfg": {
+      "sha256": "a82ecf48cd952be57e8786d4dbb3e041c28d7318e0284fa4a7ea0f2873030c6a",
+      "bytes": 82
+    },
+    "lib/libclang-cpp.dylib": {
+      "sha256": "540ba785401096456b8cbb208f41a01956c88b232f422fc4ef9c6114f9ccd6f4",
+      "bytes": 93198848
+    },
+    "lib/libLLVM.dylib": {
+      "sha256": "dadbd373f8cc1da584c09f9c8907f5185726ad82e7912b983d66d5f6ac213544",
+      "bytes": 145411600
+    },
+    "bin/arm64ec-w64-mingw32-strip": {
+      "sha256": "107fd8c5a585243765cb78bd2ecf1d9e8a56ee4dbfd64ba1ea45652d7c83686e",
+      "bytes": 409216
+    },
+    "bin/arm64ec-w64-mingw32-ld": {
+      "sha256": "e4d9e6a4709da716994e90cfb089e159b155d9361fbadc93a4aa7159dc76b21d",
+      "bytes": 1472
+    }
+  },
+  "reference": {
+    "repository": "So2K/Madeira-iPhone",
+    "run_id": 40923296709,
+    "artifact_id": 12921902819,
+    "zip_bytes": 82602162,
+    "zip_sha256": "7047cf2e5001a9ed165d8edf4ae54b605a07aef0bf7d6d613cd9cb60ee30483d",
+    "prefix": "windows/",
+    "baseline_pe_sha256": "6d0e5c43ec2fe0fbb0aa250ddad7158fbeec6ba12c1f5de8afc5094c3d0f5651",
+    "baseline_pe_bytes": 1507328
+  },
+  "normal_dlls": [
+    "kernel32.dll",
+    "ntdll.dll"
+  ],
+  "delayed_apis": {
+    "advapi32.dll": [
+      "SystemFunction036"
+    ],
+    "user32.dll": [
+      "GetActiveWindow",
+      "MessageBoxIndirectW"
+    ]
+  },
+  "runtime_acceptance": false
+}
