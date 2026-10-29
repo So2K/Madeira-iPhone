@@ -8,6 +8,26 @@
 
 import Foundation
 
+/// Claims the ping completion once, including callbacks delivered concurrently.
+private final class SteamPingContinuation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    init(_ continuation: CheckedContinuation<Void, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(with result: Result<Void, Error>) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+
+        // Resume outside the lock; later callbacks have no continuation to claim.
+        continuation?.resume(with: result)
+    }
+}
+
 // MARK: - WebSocket Delegate
 
 /// Logs WebSocket lifecycle events: protocol negotiation, server-initiated close.
@@ -86,11 +106,12 @@ actor SteamConnection {
 
         // Verify the connection completed (WebSocket handshake + ping round-trip)
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let pingContinuation = SteamPingContinuation(cont)
             task.sendPing { error in
                 if let error {
-                    cont.resume(throwing: SteamError.connectionFailed(error.localizedDescription))
+                    pingContinuation.resume(with: .failure(SteamError.connectionFailed(error.localizedDescription)))
                 } else {
-                    cont.resume()
+                    pingContinuation.resume(with: .success(()))
                 }
             }
         }
