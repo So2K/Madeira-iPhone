@@ -68,4 +68,16 @@ fi
 [ "$(git -C "$LUA" rev-parse HEAD)" = a4c064539ea931274d407e1249b4bb575424a0f4 ] || exit 1
 LUAJIT_SRC="$LUA" bash "$R/build/luajit-x64/build.sh"
 
+# Source-owned ONI allocator backport. This runs before the Windows component
+# snapshot, so the normal component manifest hashes the final patched PE.
+# Its strict script refuses any changed compiler output or opcode neighborhood.
+oni_ntdll_report_base="${RUNNER_TEMP:-$R/.runtime-cache}"
+mkdir -p "$oni_ntdll_report_base"
+oni_ntdll_report_dir=$(mktemp -d "$oni_ntdll_report_base/oni-ntdll-XXXXXX")
+PYTHONDONTWRITEBYTECODE=1 python3 "$R/build/windows-runtime/oni-ntdll/patch_ntdll_ci.py" \
+    "$R/app/Madeira/arm64ec-windows/ntdll.dll" \
+    "$R/app/Madeira/arm64ec-windows/ntdll.dll" \
+    --in-place --report "$oni_ntdll_report_dir/report.json" \
+    --repo-root "$R" --toolchain-root "$R/toolchains/llvm-mingw-20260421-ucrt-macos-universal"
+
 python3 "$R/build/windows-runtime/targets.py" closure

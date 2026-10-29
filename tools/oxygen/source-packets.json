@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "scope": "Unchanged public corresponding-source packets; no certificates, account or game data",
+  "archives": {
+    "build/windows-runtime/oni-ntdll/source-packets/Madeira-ONI-ntdll-CI-timestamps-v3-source.zip": {
+      "sha256": "d33061e4e81ced42d3b54d116708c784420941504acd697c195b58794499c3f4",
+      "bytes": 310620
+    },
+    "build/windows-runtime/oni-ntdll/source-packets/Madeira-ONI-latest-ntdll-source.zip": {
+      "sha256": "27b4489e15cb5c14ddb5ac18da17373fdeca9971832ce7d97dd028165e8e88c1",
+      "bytes": 742998
+    },
+    "tools/oxygen/source-packets/Madeira-ONI-native-integer-store-source.zip": {
+      "sha256": "614e9a19ee3703f0332de990c6d403bef6b11305ab07dfd5754b8759bde3b0a1",
+      "bytes": 516602
+    }
+  }
+}

@@ -1,16 +1,17 @@
-name: Build IPA
+name: Build ONI native canary
 
+# Manual only: do not spend cold-build jobs on every push or pull request.
 on:
-  push:
-    branches: [main, 'codex/pr-build-*']
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+
 concurrency:
-  group: ipa-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: oni-native-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 # A complete IPA cache is scoped by the checked-out tree and build environment.
@@ -20,6 +21,7 @@ concurrency:
 jobs:
   plan:
     runs-on: xcode-27
+    timeout-minutes: 360
     outputs:
       ipa: ${{ steps.key.outputs.ipa }}
       reuse: ${{ steps.ipa.outputs.cache-hit }}
@@ -27,6 +29,11 @@ jobs:
       ipaenv: ${{ steps.sdk.outputs.ipa }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 64
+          filter: blob:none
+      - name: Validate reviewed ONI source and selected Xcode
+        run: python3 tools/oxygen/verify-ci-inputs.py
       - name: Check build reuse rules
         run: |
           python3 tests/host/check-build-inputs.py
@@ -53,6 +60,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.reuse == 'true'
     runs-on: xcode-27
+    timeout-minutes: 360
     env:
       MADEIRA_PLANNED_SDK: ${{ needs.plan.outputs.sdk }}
       MADEIRA_RUNTIME_SDK: ${{ needs.plan.outputs.sdk }}
@@ -70,6 +78,7 @@ jobs:
           test -s dist/Madeira.ipa
           unzip -tq dist/Madeira.ipa
           python3 tools/build/runtime-components.py ipa dist/Madeira.ipa
+          python3 tools/oxygen/verify-ci-inputs.py --ipa dist/Madeira.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: Madeira-ipa
@@ -223,6 +232,9 @@ jobs:
       MADEIRA_RUNTIME_REUSE: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 64
+          filter: blob:none
       - id: sdk
         run: bash tools/build/ci-input-key.sh
       - id: key
@@ -252,6 +264,20 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 1
+      - name: Collect public ONI failure diagnostics
+        if: failure() && matrix.component == 'windows'
+        continue-on-error: true
+        run: python3 tools/oxygen/collect-failure-diagnostics.py
+      - name: Retain public ONI failure diagnostics for one day
+        if: failure() && matrix.component == 'windows'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: oni-windows-public-diagnostics
+          path: ${{ runner.temp }}/oni-failure-diagnostics
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 0
 
   app:
     needs: [plan, llvm, fex, i386, runtime]
@@ -267,6 +293,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 64
+          filter: blob:none
       - id: sdk
         run: bash tools/build/ci-input-key.sh
       - id: cache-llvm
@@ -391,8 +419,12 @@ jobs:
           pattern: runtime-*
           path: .runtime-cache
           merge-multiple: true
+      - name: Revalidate reviewed ONI source before native compilation
+        run: python3 tools/oxygen/verify-ci-inputs.py
       - name: Build IPA
         run: tools/build-ipa.sh
+      - name: Verify ONI PE postcondition in complete IPA
+        run: python3 tools/oxygen/verify-ci-inputs.py --ipa dist/Madeira.ipa
       - uses: actions/cache/save@v4
         with:
           key: ${{ needs.plan.outputs.ipa }}
@@ -404,3 +436,18 @@ jobs:
           if-no-files-found: error
           overwrite: true
           compression-level: 0
+      - name: Collect public ONI failure diagnostics
+        if: failure()
+        continue-on-error: true
+        run: python3 tools/oxygen/collect-failure-diagnostics.py
+      - name: Retain public ONI failure diagnostics for one day
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: oni-app-public-diagnostics
+          path: ${{ runner.temp }}/oni-failure-diagnostics
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 0
+

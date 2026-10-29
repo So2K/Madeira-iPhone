@@ -1,0 +1,71 @@
+{
+  "schema": 3,
+  "mode": "pe-build-timestamps-v3",
+  "required_runtime_files": [
+    "patch_ntdll_ci.py",
+    "patch_ntdll.py",
+    "provenance-pins.json"
+  ],
+  "vendoring_deliverables": {
+    "README.txt": {
+      "sha256": "aae0f3e33c820e8d7608c2a94ac81961b402c31cb8cdf73aa84a242adba51315",
+      "bytes": 5279,
+      "mode": 33152
+    },
+    "licenses/LGPL-2.1.txt": {
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95",
+      "bytes": 26419,
+      "mode": 33152
+    },
+    "licenses/LICENSE-MADEIRA-EXCEPTION.txt": {
+      "sha256": "534f059c2e9fe5de1acde82b920651b77ea3b4253f86837a3d6a81f54a5bdbbc",
+      "bytes": 3840,
+      "mode": 33152
+    },
+    "licenses/LICENSE-MADEIRA-GPL-3.0.txt": {
+      "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195",
+      "bytes": 35150,
+      "mode": 33152
+    },
+    "licenses/LICENSE-MIT.txt": {
+      "sha256": "d1d453679ddfcd2b77d67db999000f69ff66ccfb43f83a62b92d5ad51876648e",
+      "bytes": 1105,
+      "mode": 33152
+    },
+    "licenses/THIRD-PARTY-NOTICES.txt": {
+      "sha256": "a39d4726985027dc0e4f8041c21f62b9c7341f10fc60fb132bd3569170f047a8",
+      "bytes": 4841,
+      "mode": 33152
+    },
+    "patch_ntdll.py": {
+      "sha256": "74e11d9759fcb14e98784ddbc1b15004e8ad2c67b93050972ab1b6fa6fbab6a6",
+      "bytes": 12966,
+      "mode": 33152
+    },
+    "patch_ntdll_ci.py": {
+      "sha256": "df7ae5b8b86ab18b33138b411c17e913872b21d4ffba30282e63dbf0616da851",
+      "bytes": 10248,
+      "mode": 33152
+    },
+    "proof/allocator_loop.S": {
+      "sha256": "29eacfa4c60c0b5096e11d703e79500f17b53eab741d18325878b8040f29bfd1",
+      "bytes": 728,
+      "mode": 33152
+    },
+    "provenance-pins.json": {
+      "sha256": "caa60e5ff122cda1cfe10b541ac8fec92591aba92e26dcc5a468bd856f6a6940",
+      "bytes": 2850,
+      "mode": 33152
+    },
+    "v1-proof/source-archive-pin.json": {
+      "sha256": "082a674c101d258031de6ce34ee4341b514a4ebc0a75c2a4f0880c19801dc80d",
+      "bytes": 341,
+      "mode": 33152
+    }
+  },
+  "api": [
+    "normalize_timestamp(data:bytes)->bytes",
+    "verify_candidate(data:bytes)->dict"
+  ],
+  "full_source_archive_required_alongside": true
+}

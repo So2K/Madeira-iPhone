@@ -1,0 +1,70 @@
+{
+  "schema": 3,
+  "base_upstream_commit": "c2c1b03a9e36ef986c980b9eae3c14d05a372db1",
+  "wine_gitlink": "df1c5ea51e194937ac204bc3120922dc56a61bec",
+  "toolchain_name": "llvm-mingw-20260421-ucrt-macos-universal",
+  "toolchain_archive_sha256": "bd85a3975723815cef28dbbd2ca2cb0c926f6b348a12a0453f39f7af273cb3f7",
+  "toolchain_files": {
+    "bin/clang-22": {
+      "sha256": "2d6ac7a1d7a2cb022662b2243859c82cb68ed3691b387eb98a2b68a3d2f89616",
+      "bytes": 289320
+    },
+    "bin/ld.lld": {
+      "sha256": "117357c987f9729429b07c7c8ad0fc059fa9973cbed1ad1bb557774854b8a8fa",
+      "bytes": 10539824
+    },
+    "bin/llvm-objcopy": {
+      "sha256": "107fd8c5a585243765cb78bd2ecf1d9e8a56ee4dbfd64ba1ea45652d7c83686e",
+      "bytes": 409216
+    },
+    "bin/arm64ec-w64-mingw32-clang": {
+      "sha256": "c9b86311ade81d53235c93fafabdf98328d094de344ea9a9038e0dab6695ee9f",
+      "bytes": 2988
+    },
+    "bin/arm64ec-w64-windows-gnu.cfg": {
+      "sha256": "a82ecf48cd952be57e8786d4dbb3e041c28d7318e0284fa4a7ea0f2873030c6a",
+      "bytes": 82
+    },
+    "lib/libclang-cpp.dylib": {
+      "sha256": "540ba785401096456b8cbb208f41a01956c88b232f422fc4ef9c6114f9ccd6f4",
+      "bytes": 93198848
+    },
+    "lib/libLLVM.dylib": {
+      "sha256": "dadbd373f8cc1da584c09f9c8907f5185726ad82e7912b983d66d5f6ac213544",
+      "bytes": 145411600
+    },
+    "bin/arm64ec-w64-mingw32-strip": {
+      "sha256": "107fd8c5a585243765cb78bd2ecf1d9e8a56ee4dbfd64ba1ea45652d7c83686e",
+      "bytes": 409216
+    },
+    "bin/arm64ec-w64-mingw32-ld": {
+      "sha256": "e4d9e6a4709da716994e90cfb089e159b155d9361fbadc93a4aa7159dc76b21d",
+      "bytes": 1472
+    }
+  },
+  "source_files": {
+    "build/wine-pe/build-ntdll.sh": "55f54bfef7c0078192d241a5296880b97d3a9b707f043f5d526ae90416a06152",
+    "tools/build/build-wine.sh": "1ecdbc2d839b45548fb393783e8bb2c6dec5b47eb90ebed84b88c2bbfbb7e96b",
+    "tools/build/setup-llvm-mingw.sh": "d277537c15e5ae35f730a24cdf6bf8d9af5e8e56899f2eef5d4a8e5aa6b5e87c",
+    "build/ntdll-unix/signal_arm64_ios.c": "3e0e2ff98aeafe89f0a458613b8182942b95ecfee099ede71dd98ca5828faabe"
+  },
+  "strict_v1_patcher_sha256": "74e11d9759fcb14e98784ddbc1b15004e8ad2c67b93050972ab1b6fa6fbab6a6",
+  "official_timestamp": 1793239674,
+  "official_input_sha256": "3aca1fee7b0c03c56771f809bb7dae7caa1d6bb952d9b17592d6336019eaae4f",
+  "official_candidate_sha256": "153af52414270ff9a373210c0fcecbfad3f54cffddcc88181ef1ddd2dccb8833",
+  "mode": "pe-build-timestamps-v3",
+  "official_debug_directory": {
+    "rva": 762608,
+    "bytes": 28,
+    "file_offset": 762608,
+    "characteristics": 0,
+    "major_version": 0,
+    "minor_version": 0,
+    "type": 2,
+    "payload_bytes": 25,
+    "payload_rva": 762636,
+    "payload_file_offset": 762636,
+    "payload_sha256": "61126de1b795b976f3ac878f48e88fa77a87d7308ba57c7642b9e1068403a496",
+    "timestamp_file_offset": 762612
+  }
+}
