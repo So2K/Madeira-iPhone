@@ -1,0 +1,82 @@
+{
+  "schema": 1,
+  "ready": true,
+  "base_commit": "bfaa84b8e5c7fe675bff70b200e869849020d529",
+  "repository": "So2K/Madeira-iPhone",
+  "run_id": 40923296709,
+  "sdk": "f4d1acaa8ca6770ebfa7",
+  "native_source_sha256": "33d7f54549704e6ab32cfdf78bb0b11dfe7d5d94f95d3a2338ded57a0ccdf136",
+  "native_peer_go_sha256": "c813a64e626964bf4aa91531db81f767ca6a7b238a76f7e178b68ab84d94b4d2",
+  "artifacts": [
+    {
+      "id": 12922070185,
+      "name": "runtime-zink",
+      "bytes": 3756523,
+      "sha256": "a39c5e05253ae1b7a6f2e18840e0da251c65084da27a9ca5e97dfd60729c2d50",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12922065874,
+      "name": "runtime-mesa-d3d12",
+      "bytes": 6152201,
+      "sha256": "4b680ce02909bd9a88d908f27e9ebeb60a46fa9192ff71bc37ba0ecb58e73d89",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12921910466,
+      "name": "runtime-vulkan-pe",
+      "bytes": 7197809,
+      "sha256": "f3218f97689e05fbf20ace908ae81b20e4234aa620d708acc16d05942b94bf0f",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12921902819,
+      "name": "runtime-windows",
+      "bytes": 82602162,
+      "sha256": "7047cf2e5001a9ed165d8edf4ae54b605a07aef0bf7d6d613cd9cb60ee30483d",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12921490650,
+      "name": "native-llvm-f4d1acaa8ca6770ebfa7",
+      "bytes": 32000509,
+      "sha256": "93bb4681d0322ad9f4215c8d5a1e5501f7347b93afbe55215b871de6059bbf07",
+      "destination": "toolchains"
+    },
+    {
+      "id": 12921296820,
+      "name": "runtime-moltenvk",
+      "bytes": 1491357,
+      "sha256": "e2c64aeb9ed865c4c16bef96d774ce6318e7e844e75b51c501dc3653fc4a4c4e",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12921167238,
+      "name": "runtime-kosmickrisp",
+      "bytes": 2000271,
+      "sha256": "3269db04136870fcbeebc5b25836d45b4bbabadcc26f32deaa952252c6c67049",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12921116463,
+      "name": "runtime-dock",
+      "bytes": 43955,
+      "sha256": "89ba4c4318c52e7ebd947ca8d0ecd897fea97f2390c5b74d4882c0f36293a42a",
+      "destination": ".runtime-cache"
+    },
+    {
+      "id": 12920298174,
+      "name": "native-i386-f4d1acaa8ca6770ebfa7",
+      "bytes": 63291803,
+      "sha256": "709d5afac59010bb42443a2ecbc1847b200a96514033a07763bdb0fdfaddc574",
+      "destination": "app/Madeira/i386-windows"
+    },
+    {
+      "id": 12919911634,
+      "name": "native-fex-f4d1acaa8ca6770ebfa7",
+      "bytes": 1102233,
+      "sha256": "2fcb1a42717ca4bddd4022863fe83d8caf7969542cf6cfaa81e9e42d7b38f9a2",
+      "destination": "FEX/build-ios"
+    }
+  ]
+}
