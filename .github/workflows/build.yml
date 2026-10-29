@@ -24,7 +24,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(xcode-select -p)" = "$DEVELOPER_DIR"
-          xcodebuild -version | head -n 1 | grep -Fx 'Xcode 27.1'
+          xcodebuild -version > "$RUNNER_TEMP/oni-xcode-version.txt"
+          grep -Fx 'Xcode 27.1' "$RUNNER_TEMP/oni-xcode-version.txt"
           bash tools/build/ci-input-key.sh
       - name: Fetch exact Wine source only
         run: git submodule update --init --depth 1 wine
