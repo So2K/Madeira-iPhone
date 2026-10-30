@@ -43,7 +43,7 @@
       "mode": 33152
     },
     "patch_ntdll_ci.py": {
-      "sha256": "df7ae5b8b86ab18b33138b411c17e913872b21d4ffba30282e63dbf0616da851",
+      "sha256": "b5961a611a5b01f55c3c5429b6b3a14feaab085475f14651648f634c0b36b700",
       "bytes": 10248,
       "mode": 33152
     },
@@ -53,7 +53,7 @@
       "mode": 33152
     },
     "provenance-pins.json": {
-      "sha256": "caa60e5ff122cda1cfe10b541ac8fec92591aba92e26dcc5a468bd856f6a6940",
+      "sha256": "f2618b235962f5cfd7e1023883c36beac90b2342fa1a3c8939bdde0723b57f41",
       "bytes": 2850,
       "mode": 33152
     },

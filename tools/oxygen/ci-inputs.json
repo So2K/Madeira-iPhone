@@ -38,10 +38,10 @@
       "build/windows-runtime/oni-ntdll/licenses/LICENSE-MIT.txt": "d1d453679ddfcd2b77d67db999000f69ff66ccfb43f83a62b92d5ad51876648e",
       "build/windows-runtime/oni-ntdll/licenses/THIRD-PARTY-NOTICES.txt": "a39d4726985027dc0e4f8041c21f62b9c7341f10fc60fb132bd3569170f047a8",
       "build/windows-runtime/oni-ntdll/patch_ntdll.py": "74e11d9759fcb14e98784ddbc1b15004e8ad2c67b93050972ab1b6fa6fbab6a6",
-      "build/windows-runtime/oni-ntdll/patch_ntdll_ci.py": "df7ae5b8b86ab18b33138b411c17e913872b21d4ffba30282e63dbf0616da851",
+      "build/windows-runtime/oni-ntdll/patch_ntdll_ci.py": "b5961a611a5b01f55c3c5429b6b3a14feaab085475f14651648f634c0b36b700",
       "build/windows-runtime/oni-ntdll/proof/allocator_loop.S": "29eacfa4c60c0b5096e11d703e79500f17b53eab741d18325878b8040f29bfd1",
-      "build/windows-runtime/oni-ntdll/provenance-pins.json": "caa60e5ff122cda1cfe10b541ac8fec92591aba92e26dcc5a468bd856f6a6940",
-      "build/windows-runtime/oni-ntdll/runtime-members.json": "f3aaa51be6e1b83513db8676991e15cdb647a11d88dd2864f4da6c5af19a73ba",
+      "build/windows-runtime/oni-ntdll/provenance-pins.json": "f2618b235962f5cfd7e1023883c36beac90b2342fa1a3c8939bdde0723b57f41",
+      "build/windows-runtime/oni-ntdll/runtime-members.json": "6af3120819f469a73a43ffa7ae1791e4d1930d0a6ac5daa97886f58487d5c463",
       "build/windows-runtime/oni-ntdll/source-packets/Madeira-ONI-latest-ntdll-source.zip": "27b4489e15cb5c14ddb5ac18da17373fdeca9971832ce7d97dd028165e8e88c1",
       "build/windows-runtime/oni-ntdll/source-packets/Madeira-ONI-ntdll-CI-timestamps-v3-source.zip": "d33061e4e81ced42d3b54d116708c784420941504acd697c195b58794499c3f4",
       "build/windows-runtime/oni-ntdll/v1-proof/source-archive-pin.json": "082a674c101d258031de6ce34ee4341b514a4ebc0a75c2a4f0880c19801dc80d"

@@ -7,7 +7,7 @@ import argparse,hashlib,importlib.util,json,os,stat,struct,subprocess,sys,tempfi
 from pathlib import Path
 sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parent
-PINS_SHA='caa60e5ff122cda1cfe10b541ac8fec92591aba92e26dcc5a468bd856f6a6940'
+PINS_SHA='f2618b235962f5cfd7e1023883c36beac90b2342fa1a3c8939bdde0723b57f41'
 def sha(b):return hashlib.sha256(b).hexdigest()
 def digest(path):
  h=hashlib.sha256()
