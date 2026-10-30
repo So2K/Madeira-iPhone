@@ -36,13 +36,18 @@
 #include "madeira_d3d12_stubs.h"
 #include "madeira_ir_abi.h"
 #include "madeira_graphics_entry.h"
+#include "indirect_reference_decode.h"   /* indirect-reference.1: packed compound ExecuteIndirect layouts (MIT, host-tested) */
+_Static_assert(sizeof(D3D12_DRAW_ARGUMENTS) == 16, "packed DRAW ABI");
+_Static_assert(sizeof(D3D12_DRAW_INDEXED_ARGUMENTS) == 20, "packed DRAW_INDEXED ABI");
+_Static_assert(sizeof(D3D12_VERTEX_BUFFER_VIEW) == 16 && offsetof(D3D12_VERTEX_BUFFER_VIEW, SizeInBytes) == 8 && offsetof(D3D12_VERTEX_BUFFER_VIEW, StrideInBytes) == 12, "packed VBV ABI");
+_Static_assert(sizeof(D3D12_INDEX_BUFFER_VIEW) == 16 && offsetof(D3D12_INDEX_BUFFER_VIEW, SizeInBytes) == 8 && offsetof(D3D12_INDEX_BUFFER_VIEW, Format) == 12, "packed IBV ABI");
 
 /* madeira-bcd: MAD_BUILD_ID (build-pe.sh passes it from the environment) names the build,
  * so a log says which runtime ran. */
 #ifdef MAD_BUILD_ID
-#define MADEIRA_D3D12_BUILD "madeira-d3d12 M2 " MAD_BUILD_ID ", " __DATE__ " " __TIME__
+#define MADEIRA_D3D12_BUILD "madeira-d3d12 M2 " MAD_BUILD_ID ", " __DATE__ " " __TIME__ " [indirect-reference.1] [clear-copy-order.1]"
 #else
-#define MADEIRA_D3D12_BUILD "madeira-d3d12 M2 " __DATE__ " " __TIME__
+#define MADEIRA_D3D12_BUILD "madeira-d3d12 M2 " __DATE__ " " __TIME__ " [indirect-reference.1] [clear-copy-order.1]"
 #endif
 
 /* ---- diagnostics ---------------------------------------------------------
@@ -1150,6 +1155,7 @@ struct mad_resource {
     D3D12_HEAP_TYPE heap;
     UINT64 gpu_address;        /* reported by the backend at creation */
     LONG mapped;
+    volatile LONG indirect_query_unpublished; /* indirect-reference.1: sticky GPU-only query output restriction */
     obj_handle_t texture;      /* set instead of `buffer` for TEXTURE2D */
     UINT64 gpu_resource_id;    /* what a descriptor entry stores for a texture */
     UINT32 width, height;
@@ -1747,6 +1753,7 @@ enum mad_ck {
     MC_BARRIER,   /* ml1091: a ResourceBarrier; ends an open compute or blit encoder so the fence chain orders what follows */
     MC_CBV_LATCH,   /* madeira-bcd static-cbv: a table's constant-buffer descriptors as they were when a draw was recorded */
     MC_DISCARD,     /* madeira-bcd rp-discard: a DiscardResource (u.discard); the replay only notes it */
+    MC_INDIRECT_REFERENCE, /* indirect-reference.1: default-off packed compound ExecuteIndirect (u.iref) */
 };
 struct mad_cmd {
     enum mad_ck kind;
@@ -1775,6 +1782,8 @@ struct mad_cmd {
         struct { struct mad_resource *dst, *src; UINT dlevel, dslice, slevel, sslice; UINT w, h, d; UINT dx, dy, dz, sx, sy, sz; UINT dplane, splane; } tt;
         struct { UINT x, y, z; } dispatch;
         struct { struct mad_resource *args; UINT64 off; UINT count; UINT stride; struct mad_resource *cnt; UINT64 cnt_off; } ind;
+        struct { struct mad_resource *args, *cnt; UINT64 off, cnt_off; UINT count;
+                 struct mad_ir_layout layout; struct mad_rootsig *root; } iref;   /* indirect-reference.1: compact copy; owns a root signature reference */
         struct { struct mad_resource *res; UINT64 off, len; UINT8 byte; obj_handle_t pattern; } fill;   /* ml1151: pattern = exact 32-bit source */
         struct { struct mad_resource *res; UINT level, sl0, nsl, bpp; obj_handle_t pattern; } filltex;   /* MC_FILL_TEX: mip, slices, texel size */
         struct { float rgba[4]; } blend;
@@ -1858,6 +1867,14 @@ static HRESULT STDMETHODCALLTYPE list_QI(ID3D12GraphicsCommandList *This, REFIID
     return mad_qi(o, riid, out, 1);
 }
 static ULONG STDMETHODCALLTYPE list_AddRef(ID3D12GraphicsCommandList *This) { return mad_addref((struct mad_obj *)This); }
+/* indirect-reference.1: recorded compact signatures own only their associated
+ * root signature, never the command-signature object or the caller's
+ * argument-description array. */
+static void mad_list_release_indirect_roots(struct mad_list *l) {
+    unsigned k;
+    for (k = 0; k < l->ncmds; k++) if (l->cmds[k].kind == MC_INDIRECT_REFERENCE && l->cmds[k].u.iref.root)
+        ID3D12RootSignature_Release((ID3D12RootSignature *)l->cmds[k].u.iref.root);
+}
 static ULONG STDMETHODCALLTYPE list_Release(ID3D12GraphicsCommandList *This) {
     struct mad_list *l = (struct mad_list *)This;
     LONG r = InterlockedDecrement(&l->refs);
@@ -1865,6 +1882,7 @@ static ULONG STDMETHODCALLTYPE list_Release(ID3D12GraphicsCommandList *This) {
         if (l->alloc && !l->closed) InterlockedDecrement(&l->alloc->recording);
         if (l->alloc) ID3D12CommandAllocator_Release((ID3D12CommandAllocator *)l->alloc);
         for (unsigned k = 0; k < l->nrings; k++) NSObject_release(l->rings[k]);
+        mad_list_release_indirect_roots(l);   /* indirect-reference.1 */
         if (l->nrings) InterlockedExchangeAdd(&g_ring_chunks, -(LONG)l->nrings);   /* madeira-bcd metal-gap: live chunks */
         free(l->rings); free(l->ring_cpu); free(l->ring_gpu); free(l->cmds); free(l->used); free(l->cdata);
         free(l);
@@ -1896,6 +1914,7 @@ static HRESULT STDMETHODCALLTYPE list_Reset(ID3D12GraphicsCommandList *This,
     InterlockedIncrement(&l->alloc->recording);
     l->recorded_generation = l->alloc->generation;
     l->closed = 0;
+    mad_list_release_indirect_roots(l);   /* indirect-reference.1: after the inflight wait above */
     l->ncmds = 0;
     l->nused = 0;
     l->ncdata = 0;
@@ -2065,8 +2084,11 @@ struct mad_exec {
     D3D12_PRIMITIVE_TOPOLOGY topo;
     struct mad_resource *ib; UINT64 ib_off; enum WMTIndexType ib_type;
     unsigned renc_seq;                          /* ml879: rmetald label index of the open render encoder */
-    struct { struct mad_resource *res; UINT64 off; UINT stride; } vb[16];
+    struct { struct mad_resource *res; UINT64 off; UINT stride, size; int bounded; } vb[16];   /* indirect-reference.1: size/bounded = exact VBV extent */
+    UINT ib_size; int ib_bounded;   /* indirect-reference.1: exact indirect IBV extent, independent of backing size */
+    UINT indirect_null_vbs;         /* indirect-reference.1: defined NULL VB views after a reference reset */
     unsigned draws, skipped;
+    int aborted;                    /* indirect-reference.1 / clear-copy-order.1: never replay further into this list */
     UINT64 vis_prev;            /* ml1088: the visibility slot the open encoder was last told to count into, ~0 = disabled */
     obj_handle_t enc_vis_buf;   /* ml1088: the slot chunk attached to the open encoder (a pass attribute) */
     unsigned pass_draws;        /* ml1098: draws encoded into the open render pass */
@@ -2137,6 +2159,7 @@ struct mad_vis_batch {
     obj_handle_t cb;
     struct mad_ringchunk *chunks; unsigned nchunks, ccap;
     UINT64 next; int dirty; unsigned active;
+    int failed;     /* indirect-reference.1 / clear-copy-order.1: a split prefix or clear failed: never publish its slots */
     UINT64 evseq;   /* ml1092: End and Resolve events keep their program order */
     struct mad_vis_query *q; unsigned nq, qcap;
     struct mad_vis_resolve *r; unsigned nr, rcap;
@@ -3310,8 +3333,13 @@ static void mad_attach_view(struct WMTColorAttachmentInfo *a, const struct mad_r
     else { a->slice = v->slice; a->depth_plane = 0; }
 }
 static void exec_drop_pending(struct mad_exec *e, int i) {
-    if (i < 0) return;
-    e->pend[i] = e->pend[--e->npend];
+    if (i < 0 || (unsigned)i >= e->npend) return;
+    /* clear-copy-order.1: pending views on one texture can overlap; consuming
+     * an unrelated clear must not move the newest entry ahead of an older one
+     * (at most 16 entries). */
+    if ((unsigned)i + 1 < e->npend)
+        memmove(&e->pend[i], &e->pend[i + 1], (e->npend - (unsigned)i - 1) * sizeof e->pend[0]);
+    e->npend--;
 }
 
 /* ---- madeira-bcd: render-pass traffic -----------------------------------------
@@ -3427,7 +3455,7 @@ static int mad_clear_defer_on(void) {
     }
     return g_clear_defer;
 }
-static void exec_flush_clear(struct mad_exec *e, int i);
+static int exec_flush_clear(struct mad_exec *e, int i);
 /* The pending clears of resources c names go first (a barrier, copy or fill). */
 static void exec_flush_named(struct mad_exec *e, const struct mad_cmd *c) {
     unsigned k;
@@ -3499,9 +3527,11 @@ static void exec_discard(struct mad_exec *e, const struct mad_cmd *c) {
 static void exec_rp_note(struct mad_exec *e, const struct mad_cmd *c) {
     switch (c->kind) {
     case MC_DISCARD: exec_discard(e, c); return;
-    case MC_BARRIER: case MC_COPY_BB: case MC_COPY_B2T: case MC_COPY_T2B: case MC_COPY_T2T: case MC_FILL_BB: case MC_FILL_TEX:
+    case MC_BARRIER: case MC_COPY_BB: case MC_FILL_BB:
         if (e->npend && mad_clear_defer_on()) exec_flush_named(e, c);
         break;
+    case MC_COPY_B2T: case MC_COPY_T2B: case MC_COPY_T2T: case MC_FILL_TEX:
+        break;   /* clear-copy-order.1: exec_copy materializes the named texture clears first (exec_copy_pending_clears), whatever clear-defer says */
     case MC_CLEAR_RT: case MC_CLEAR_DS:
         if (e->npend && mad_clear_defer_on()) exec_flush_other_views(e, c->u.clear.res, &c->u.clear.v);
         break;
@@ -3852,10 +3882,11 @@ static void mad_rp_close(struct mad_queue *q) {
 
 /* A clear whose target is not part of the next pass still has to happen: it
  * gets a pass of its own with nothing drawn. */
-static void exec_flush_clear(struct mad_exec *e, int i) {
+static int exec_flush_clear(struct mad_exec *e, int i) {   /* clear-copy-order.1: 1 = the clear pass was encoded */
     struct WMTRenderPassInfo rpi;
     obj_handle_t enc;
-    if (i < 0 || !e->pend[i].res || !e->pend[i].res->texture) { exec_drop_pending(e, i); return; }
+    if (i < 0 || (unsigned)i >= e->npend) return 0;
+    if (!e->pend[i].res || !e->pend[i].res->texture) { exec_drop_pending(e, i); return 0; }
     if (e->renc) InterlockedIncrement(&g_pass_end_clear);
     InterlockedIncrement(&g_pass_clear_only);
     exec_end(e);
@@ -3892,10 +3923,15 @@ static void exec_flush_clear(struct mad_exec *e, int i) {
         else mad_tr_pass(&rpi, &one, &e->pend[i].v, 1, NULL, NULL);
     }
     e->f6_att[0] = e->pend[i].res; e->f6_natt = 1;   /* ml1134 */
-    if (enc) { exec_fence_render(e, enc, 0); exec_fence_render(e, enc, 1); }   /* ml1091: a clear pass writes its target; keep it in the chain */
+    if (enc) {   /* ml1091: a clear pass writes its target; keep it in the chain */
+        exec_fence_render(e, enc, 0);
+        exec_note_write(e, e->pend[i].res);   /* clear-copy-order.1: after begin (mode 3's wait clears nwr) */
+        exec_fence_render(e, enc, 1);
+    }
     e->f6_natt = 0;
     if (enc) MTLCommandEncoder_endEncoding(enc);
     exec_drop_pending(e, i);
+    return enc != 0;
 }
 
 static void exec_add_clear(struct mad_exec *e, struct mad_resource *r, const struct mad_rtvp *v, const float *rgba, float depth, int is_depth, UINT8 stencil, UINT8 flags) {
@@ -6465,7 +6501,7 @@ static int mad_air_build_vb_table_mask(struct mad_exec *e, const struct mad_pso 
          * foliage vertex/instance took another plant's transform: the depth
          * prepass and the base pass drew different grass (ph-valley09/10). */
         tab[idx].stride = e->vb[slot].stride;
-        tab[idx].length = (UINT32)(r->size > e->vb[slot].off ? r->size - e->vb[slot].off : 0);
+        tab[idx].length = e->vb[slot].bounded ? e->vb[slot].size : (UINT32)(r->size > e->vb[slot].off ? r->size - e->vb[slot].off : 0);   /* indirect-reference.1 */
         n++;
     }
     (void)n;
@@ -6508,7 +6544,7 @@ static int mad_rs_on(void) {
 static int mad_rs_bucket(enum mad_ck k) {
     switch (k) {
     case MC_DRAW: case MC_DRAW_INDEXED: return RS_DRAW;
-    case MC_DRAW_INDIRECT: case MC_DRAW_INDEXED_INDIRECT: case MC_DISPATCH_INDIRECT: return RS_INDIRECT;
+    case MC_DRAW_INDIRECT: case MC_DRAW_INDEXED_INDIRECT: case MC_DISPATCH_INDIRECT: case MC_INDIRECT_REFERENCE: return RS_INDIRECT;
     case MC_DISPATCH: return RS_DISPATCH;
     case MC_COPY_BB: case MC_COPY_B2T: case MC_COPY_T2B: case MC_COPY_T2T: case MC_RESOLVE: return RS_COPY;
     case MC_CLEAR_RT: case MC_CLEAR_DS: case MC_FILL_BB: case MC_FILL_TEX: return RS_CLEAR;
@@ -8291,7 +8327,7 @@ tess_go:
          * the same element" (D3D semantics); it must not be promoted to the
          * packed stride, which made the base pass read successive elements of
          * a per-draw constant stream. Unbound slots keep the assumed stride. */
-        for (i = 0; i < 16; i++) strides[i] = e->vb[i].res ? e->vb[i].stride : e->pso->vb_stride[i];
+        for (i = 0; i < 16; i++) strides[i] = e->vb[i].res ? e->vb[i].stride : (e->indirect_null_vbs & (1u << i)) ? 0 : e->pso->vb_stride[i];   /* indirect-reference.1: a reset NULL view fetches one zero element */
         c_pso.pso = mad_pso_for_strides(e->pso, strides);
     }
     if (dd && !mad_dd_pso(dd, c_pso.pso)) c_pso.type = WMTRenderCommandNop;   /* madeira-bcd draw-dedup: the encoder has it */
@@ -8403,9 +8439,15 @@ tess_go:
      * 0 of 213; the horse frame 106 of 133 (Astra, ph-rdr58 capture review).
      * Keep the two compilers' binding ABIs apart. */
     if (!gsemu && !tv && e->pso->backend == MADEIRA_IR_BACKEND_MSC) {
-        for (i = 0; i < 16; i++)
+        for (i = 0; i < 16; i++) {
             if (e->vb[i].res && e->vb[i].res->buffer)
                 MAD_SETBUF(WMTRenderCommandSetVertexBuffer, e->vb[i].res->buffer, e->vb[i].off, (uint8_t)(6 + i));
+            else if ((e->indirect_null_vbs & e->pso->vb_mask & (1u << i)) && dev->null_buffer)
+                /* indirect-reference.1: the constant-step stride variant above
+                 * fetches one zero element per vertex; never leave a required
+                 * MSC slot nil. */
+                MAD_SETBUF(WMTRenderCommandSetVertexBuffer, dev->null_buffer, 0, (uint8_t)(6 + i));
+        }
     }
     /* ml912: the converter's draw contract (metal_irconverter_runtime.h,
      * IRRuntimeDraw*): every vertex stage that reads SV_VertexID /
@@ -8465,7 +8507,7 @@ tess_go:
             memset(vbt, 0, sizeof vbt);
             for (i = 0; i < 16; i++) if (e->vb[i].res && e->vb[i].res->buffer) {
                 vbt[i].addr = e->vb[i].res->gpu_address + e->vb[i].off;
-                vbt[i].length = (UINT32)(e->vb[i].res->size > e->vb[i].off ? e->vb[i].res->size - e->vb[i].off : 0);
+                vbt[i].length = e->vb[i].bounded ? e->vb[i].size : (UINT32)(e->vb[i].res->size > e->vb[i].off ? e->vb[i].res->size - e->vb[i].off : 0);   /* indirect-reference.1 */
                 vbt[i].stride = e->vb[i].stride;
             }
             memcpy(cpu + MAD_ARG_VBTABLE_OFF, vbt, sizeof vbt);
@@ -9059,7 +9101,59 @@ static int mad_bc_upload_decoded(struct mad_exec *e, const struct mad_cmd *c) {
                   kind > 10 ? kind - 10 : kind, cw, ch, cd, t->width, t->height, (unsigned)c->u.bt.level, (long)n_ok);
     return 1;
 }
+/* clear-copy-order.1: a deferred attachment clear is a real earlier write.
+ * Texture reads must observe it, and partial texture writes must preserve its
+ * untouched pixels. Flush only matching resources; a no-match/buffer-only copy
+ * keeps the existing encoder batching. All views of a matched resource are
+ * conservatively consumed in their current pending order (bounded by 16).
+ * With clear-defer = 1 this replaces exec_rp_note's exec_flush_named for these
+ * four kinds; with clear-defer = 0 it closes the gap where a pending clear
+ * waited for the next render pass while the copy read the old texels. */
+static unsigned exec_flush_copy_clears_for(struct mad_exec *e, struct mad_resource *r) {
+    unsigned i = 0, flushed = 0;
+    if (!r || !r->texture) return 0;
+    while (i < e->npend) {
+        if (e->pend[i].res != r) { i++; continue; }
+        if (!flushed) exec_end(e);
+        /* A ResourceBarrier may have been replayed before this physical clear.
+         * Preserve both its incoming and outgoing ordering across that delay. */
+        e->fence_needed = 1; e->f6_sync_needed = 1; e->f7_reason |= 2;
+        if (!exec_flush_clear(e, (int)i)) {
+            /* Never copy stale pixels after a failed clear encoder. */
+            d3d12_log("[madeira-d3d12] clear-copy-order: clear materialization failed; replay aborted\n");
+            e->aborted = 1; InterlockedExchange(&e->q->device->device_lost, 1);
+            if (e->q->vis) e->q->vis->failed = 1;
+            return ~0u;
+        }
+        e->fence_needed = 1; e->f6_sync_needed = 1; e->f7_reason |= 2;
+        flushed++;   /* stable erase puts the next pending entry at index i */
+    }
+    return flushed;
+}
+static int exec_copy_pending_clears(struct mad_exec *e, const struct mad_cmd *c) {
+    struct mad_resource *a = NULL, *b = NULL;
+    unsigned first, second;
+    static LONG said;
+    switch (c->kind) {
+    case MC_COPY_B2T: case MC_COPY_T2B: a = c->u.bt.tex; break;
+    case MC_COPY_T2T: a = c->u.tt.src; b = c->u.tt.dst; break;
+    case MC_FILL_TEX: a = c->u.filltex.res; break;
+    default: return 1;
+    }
+    if (!e->npend) return 1;
+    first = exec_flush_copy_clears_for(e, a);
+    if (first == ~0u) return 0;
+    second = a == b ? 0 : exec_flush_copy_clears_for(e, b);
+    if (second == ~0u) return 0;
+    if (first + second) {
+        if (mad_clear_defer_on()) InterlockedExchangeAdd(&g_tr_def_flushed, (LONG)(first + second));   /* the gpu-traffic count exec_flush_named kept */
+        if (InterlockedIncrement(&said) <= 8)
+            d3d12_log("[madeira-d3d12] clear-copy-order: materialized %u texture clear(s) before blit\n", first + second);
+    }
+    return 1;
+}
 static void exec_copy(struct mad_exec *e, const struct mad_cmd *c) {
+    if (!exec_copy_pending_clears(e, c)) { MAD_SKIP(e); return; }   /* clear-copy-order.1 */
     if (!exec_begin_blit(e)) { MAD_SKIP(e); return; }
     switch (c->kind) {   /* ml1116: the destination is written */
     case MC_FILL_BB: exec_note_write(e, c->u.fill.res); break;
@@ -9848,6 +9942,284 @@ static void mad_capture_log_op(const struct mad_cmd *c) {
     d3d12_log("[capture-op] list#%u enc#%u %s -> %s\n", g_list_seq, g_enc_seq, extra, al);
 }
 
+/* ---- indirect-reference.1: compound ExecuteIndirect reference ---------------
+ * Synchronous correctness reference, off unless madeira.cfg says
+ * indirect-reference = 1. Implements exactly the three packed layouts Teardown
+ * uses (CBV+DRAW stride >= 24, CBV+DRAW_INDEXED >= 28, CBV+VBV+IBV+DRAW_INDEXED
+ * >= 60). At replay the optional count is read back from an ordered GPU copy
+ * first, then only the effective argument prefix; each readback commits and
+ * waits for a command-buffer prefix and resumes in a preallocated successor.
+ * The decoded records become ordinary direct draws through exec_draw; the
+ * bindings the signature modifies are reset afterwards (count 0 included). */
+static int mad_indirect_reference_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = mad_cfg_int_pe("indirect-reference", 0) ? 1 : 0;
+        d3d12_log("[madeira-d3d12] indirect-reference = %d (compound GPU readback reference; synchronous)\n", on);
+    }
+    return on;
+}
+static void exec_indirect_abort(struct mad_exec *e, const char *why) {
+    d3d12_log("[madeira-d3d12] indirect-reference aborted: %s\n", why);
+    e->aborted = 1;
+    InterlockedExchange(&e->q->device->device_lost, 1);
+    if (e->q->vis) e->q->vis->failed = 1;
+}
+static int mad_indirect_same_buffer(const struct mad_resource *a, const struct mad_resource *b) {
+    return a && b && (a == b || (a->buffer && a->buffer == b->buffer));
+}
+static int mad_indirect_vis_input(const struct mad_vis_batch *v,
+                                  const struct mad_resource *a, const struct mad_resource *n) {
+    unsigned i;
+    if (!v) return 0;
+    for (i = 0; i < v->nr; i++)
+        if (mad_indirect_same_buffer(v->r[i].dst, a) || mad_indirect_same_buffer(v->r[i].dst, n)) return 1;
+    return 0;
+}
+static int exec_indirect_query_input(struct mad_exec *e, struct mad_resource *a, struct mad_resource *n) {
+    struct mad_device *d = e->q->device;
+    unsigned i; int hit;
+    if (InterlockedCompareExchange(&a->indirect_query_unpublished, 0, 0) ||
+        (n && InterlockedCompareExchange(&n->indirect_query_unpublished, 0, 0))) return 1;
+    hit = mad_indirect_vis_input(e->q->vis, a, n);
+    /* Retire removes batches before publishing outside vis_lock. The publisher
+     * lock closes that window, in the same lock order used by mad_vis_retire. */
+    EnterCriticalSection(&d->vis_pub_lock);
+    EnterCriticalSection(&d->vis_lock);
+    for (i = 0; i < d->nvis_pending && !hit; i++) hit = mad_indirect_vis_input(d->vis_pending[i], a, n);
+    LeaveCriticalSection(&d->vis_lock);
+    LeaveCriticalSection(&d->vis_pub_lock);
+    return hit;
+}
+/* Only encoder / cross-encoder caches are invalid after changing command
+ * buffer. The list's logical bindings, pending clears, rp-discard set, ring
+ * slots, static-cbv copies and query state stay. */
+static void exec_indirect_new_segment(struct mad_exec *e, obj_handle_t cb) {
+    e->cb = cb;
+    e->renc = e->benc = e->cenc = 0;
+    e->enc_nrt = 0; e->enc_depth = NULL; e->enc_w = e->enc_h = 0;
+    memset(e->enc_rt, 0, sizeof e->enc_rt);
+    e->vis_prev = ~(UINT64)0; e->enc_vis_buf = 0; e->pass_draws = 0;
+    e->ud_enc = 0; e->ud_n = e->ud_committed = 0;
+    e->cenc_pso = NULL; e->diag_npso = 0; e->diag_more = 0;
+    e->rp_late = 0;
+    e->fence_needed = 1; e->nwr = 0; e->wr_all = 0;
+    e->f6_sync_needed = e->f6_list_start = 1; e->f6_enc_synced = 0;
+    e->f6_natt = 0; e->f6_cur = 0;
+    e->f7_mask = 0; e->f7_all = e->f7_open = e->f7_next_rts = 0; e->f7_reason = 2;
+    e->l->ring_q = e->q; e->l->ring_batch = e->q->batches + 1;
+}
+/* What mad_ecl_run does for sync diagnostics when it opens a batch buffer. */
+static void exec_indirect_open_diag(struct mad_queue *q, obj_handle_t cb) {
+    if (g_sd_state > 0) {
+        if (g_fence_strict) mad_strict_cb_wait(q->device, cb);
+        if (g_upload_guard || g_desc_guard || g_ic_frames) q->open_ticket = mad_ticket_new();
+    }
+}
+/* Called only while the queue's submit_lock is held by the command-list replay
+ * (mad_ecl_run). Both DEFAULT and CPU-visible sources take exactly this
+ * ordered GPU path. */
+static int exec_indirect_readback(struct mad_exec *e, struct mad_resource *source,
+                                  UINT64 offset, UINT64 length,
+                                  obj_handle_t *storage, const void **bytes) {
+    struct mad_queue *q = e->q;
+    struct WMTBufferInfo bi;
+    struct wmtcmd_blit_copy_from_buffer_to_buffer cp;
+    struct mad_vis_batch *carry;
+    obj_handle_t prefix, next, buf;
+    enum WMTCommandBufferStatus status;
+    static LONG reads;
+    *storage = 0; *bytes = NULL;
+    memset(&bi, 0, sizeof bi); bi.length = length; bi.options = WMTResourceStorageModeShared;
+    buf = MTLDevice_newBuffer(q->device->mtl_device, &bi);
+    if (!buf || !bi.memory.ptr) {
+        if (buf) NSObject_release(buf);
+        exec_indirect_abort(e, "shared readback allocation failed"); return 0;
+    }
+    /* End a pre-existing blit too: exec_begin_blit's early return otherwise
+     * bypasses the newly requested UAV-to-readback fence dependency. */
+    exec_end(e);
+    e->fence_needed = 1; e->f6_sync_needed = 1; e->f7_reason |= 2;
+    if (!exec_begin_blit(e)) {
+        NSObject_release(buf); exec_indirect_abort(e, "readback blit encoder failed"); return 0;
+    }
+    memset(&cp, 0, sizeof cp);
+    cp.type = WMTBlitCommandCopyFromBufferToBuffer;
+    cp.src = source->buffer; cp.src_offset = offset;
+    cp.dst = buf; cp.copy_length = length;
+    MTLBlitCommandEncoder_encodeCommands(e->benc, (const struct wmtcmd_base *)&cp);
+    exec_end(e);   /* sends the queued chain; advances the query slot boundary before visibility detaches */
+    if (!e->cb || q->open_cb != e->cb) {
+        NSObject_release(buf); exec_indirect_abort(e, "queue/replay command buffer mismatch"); return 0;
+    }
+    /* Allocate the successor BEFORE committing anything. Allocation failure
+     * leaves the original batch/query ownership valid for the ordinary flush. */
+    next = mad_batch_cb(q->device->mtl_queue);
+    if (!next) { NSObject_release(buf); exec_indirect_abort(e, "successor command buffer unavailable"); return 0; }
+    NSObject_retain(next);
+    prefix = e->cb; NSObject_retain(prefix);
+    carry = q->vis; q->vis = NULL;
+    mad_queue_flush(q);   /* existing serial/residency/f6-join/ring-park/commit accounting */
+    q->vis = carry;
+    q->open_cb = next;    /* owns the retained successor; no allocation hole */
+    exec_indirect_open_diag(q, next);
+    exec_indirect_new_segment(e, next);
+    MTLCommandBuffer_waitUntilCompleted(prefix);
+    status = MTLCommandBuffer_status(prefix);
+    NSObject_release(prefix);   /* pending[] retains its independent reference */
+    if (status != WMTCommandBufferStatusCompleted) {
+        NSObject_release(buf); exec_indirect_abort(e, "prefix command buffer did not complete successfully"); return 0;
+    }
+    /* Successful CPU completion also covers all f6 fences in the old segment.
+     * Its pending set is normally empty after f6_join; clear a failed join's
+     * redundant old-segment entries rather than carry them to the new one. */
+    q->f6_npend = 0;
+    *storage = buf; *bytes = bi.memory.ptr;
+    { LONG n = InterlockedIncrement(&reads);
+      if (n <= 8 || (n % 1024) == 0)
+          d3d12_log("[indirect-ref] snapshot#%ld bytes=%llu completed=1 batch=%llu\n", (long)n,
+                    (unsigned long long)length, (unsigned long long)q->batches); }
+    return 1;
+}
+static int exec_indirect_snapshot(struct mad_exec *e, const struct mad_cmd *c,
+                                  obj_handle_t *storage, const void **bytes, UINT *count) {
+    const struct mad_ir_layout *l = &c->u.iref.layout;
+    struct mad_resource *a = c->u.iref.args, *n = c->u.iref.cnt;
+    UINT64 span, budget;
+    static LONG64 budget_mb;
+    *storage = 0; *bytes = NULL; *count = 0;
+    if (!a || !a->buffer || !mad_ir_span(a->size, c->u.iref.off, c->u.iref.count, l, &span) ||
+        (n && (!n->buffer || (c->u.iref.cnt_off & 3) || c->u.iref.cnt_off > n->size || n->size - c->u.iref.cnt_off < 4))) return 0;
+    if (!c->u.iref.count) return 1;
+    if (exec_indirect_query_input(e, a, n)) {
+        static unsigned said;
+        if (said++ < 4) d3d12_log("[madeira-d3d12] indirect-reference: unpublished query-resolve output as arguments/count is unsupported; skipped\n");
+        return 0;
+    }
+    *count = c->u.iref.count;
+    if (n) {
+        obj_handle_t count_storage; const void *count_bytes;
+        if (!exec_indirect_readback(e, n, c->u.iref.cnt_off, 4, &count_storage, &count_bytes)) return 0;
+        *count = mad_ir_count(c->u.iref.count, count_bytes);
+        NSObject_release(count_storage);
+    }
+    if (!*count) return 1;
+    if (!mad_ir_span(a->size, c->u.iref.off, *count, l, &span) || span > (UINT64)SIZE_MAX) return 0;
+    if (!budget_mb) {
+        LONG64 mb = mad_cfg_int_pe("indirect-reference-budget-mb", 16);
+        if (mb < 1) mb = 1;
+        if (mb > 256) mb = 256;
+        InterlockedCompareExchange64(&budget_mb, mb, 0);
+    }
+    budget = (UINT64)budget_mb << 20;
+    if (span > budget) {
+        static unsigned said;
+        if (said++ < 8) d3d12_log("[madeira-d3d12] indirect-reference: %llu argument bytes exceed explicit %llu-byte readback budget; WHOLE call skipped, no count cap\n",
+                                  (unsigned long long)span, (unsigned long long)budget);
+        return 0;
+    }
+    return exec_indirect_readback(e, a, c->u.iref.off, span, storage, bytes);
+}
+static int exec_indirect_buffer(struct mad_exec *e, UINT64 address, UINT64 size,
+                                UINT align, struct mad_resource **out, UINT64 *off) {
+    struct mad_resource *r;
+    *out = NULL; *off = 0;
+    if (!size) return 1;   /* NULL view: its GPU address is ignored by D3D12. */
+    if (!address) return 0;
+    if (address & (align - 1)) return 0;
+    r = mad_resolve_address(e->q->device, address, off);
+    if (!r || !r->buffer || *off > r->size || size > r->size - *off) return 0;
+    *out = r; mad_list_note_used(e->l, r);
+    return 1;
+}
+static void exec_indirect_reset(struct mad_exec *e, const struct mad_ir_layout *l) {
+    e->root[l->root_index] = 0;
+    if (l->views) {
+        exec_end(e);   /* a reused MSC encoder (or draw-dedup's view of it) must not retain the old VB slot */
+        memset(&e->vb[l->vb_slot], 0, sizeof e->vb[l->vb_slot]);
+        e->indirect_null_vbs |= 1u << l->vb_slot;
+        e->ib = NULL; e->ib_off = 0; e->ib_size = 0; e->ib_bounded = 0; e->ib_type = WMTIndexTypeUInt16;
+    }
+}
+static void exec_indirect_reference(struct mad_exec *e, const struct mad_cmd *c) {
+    const struct mad_ir_layout *l = &c->u.iref.layout;
+    const void *bytes; obj_handle_t storage = 0; UINT count = 0, k, drawn = 0, zero = 0, rejected = 0;
+    static unsigned said; static LONG calls;
+    if (e->rs != c->u.iref.root) {
+        if (said++ < 8) d3d12_log("[madeira-d3d12] indirect-reference: associated root signature is not bound; skipped\n");
+        MAD_SKIP(e); exec_indirect_reset(e, l); return;
+    }
+    if (!exec_indirect_snapshot(e, c, &storage, &bytes, &count)) {
+        if (said++ < 8) d3d12_log("[madeira-d3d12] indirect-reference: readback/range unavailable; skipped\n");
+        MAD_SKIP(e); exec_indirect_reset(e, l); return;
+    }
+    for (k = 0; k < count; k++) {
+        struct mad_ir_record r;
+        struct mad_resource *cbv = NULL, *vb = NULL, *ib = NULL;
+        UINT64 cb_off, vb_off = 0, ib_off = 0, ib_size;
+        UINT isz;
+        struct mad_cmd draw;
+        mad_ir_decode(l, (const char *)bytes + (UINT64)k * l->stride, l->payload, &r);
+        /* Culled draws still participate in the final state reset, but issue no
+         * GPU fetches, including any uninitialized view fields they contain. */
+        if (!r.count || !r.instances) { zero++; continue; }
+        if (!exec_indirect_buffer(e, r.cbv, r.cbv ? 1 : 0, 256, &cbv, &cb_off)) goto invalid;
+        if (l->views) {
+            if ((r.vb_size && r.vb_stride > D3D12_REQ_MULTI_ELEMENT_STRUCTURE_SIZE_IN_BYTES) ||
+                !exec_indirect_buffer(e, r.vb_address, r.vb_size, 1, &vb, &vb_off) ||
+                (r.ib_size && r.ib_format != DXGI_FORMAT_R16_UINT && r.ib_format != DXGI_FORMAT_R32_UINT)) goto invalid;
+            isz = r.ib_size && r.ib_format == DXGI_FORMAT_R32_UINT ? 4 : 2;
+            if ((r.ib_size % isz) || !exec_indirect_buffer(e, r.ib_address, r.ib_size, isz, &ib, &ib_off)) goto invalid;
+        } else { ib = e->ib; ib_off = e->ib_off; isz = e->ib_type == WMTIndexTypeUInt32 ? 4 : 2; }
+        if (l->indexed) {
+            if (!ib) {
+                if (said++ < 8) d3d12_log("[madeira-d3d12] indirect-reference: NULL index view is valid, but drawing it is unsupported by the direct backend; record skipped\n");
+                MAD_SKIP(e); continue;
+            }
+            if (!ib->buffer || ib_off > ib->size) goto invalid;
+            ib_size = l->views ? r.ib_size : e->ib_bounded ? e->ib_size : ib->size - ib_off;
+            if ((UINT64)r.start > ib_size / isz || (UINT64)r.count > ib_size / isz - r.start) goto invalid;
+        }
+        e->root[l->root_index] = r.cbv;
+        if (e->nroot <= l->root_index) e->nroot = l->root_index + 1;
+        if (l->views) {
+            e->vb[l->vb_slot].res = vb; e->vb[l->vb_slot].off = vb_off;
+            e->vb[l->vb_slot].stride = r.vb_stride; e->vb[l->vb_slot].size = r.vb_size; e->vb[l->vb_slot].bounded = 1;
+            if (vb) e->indirect_null_vbs &= ~(1u << l->vb_slot); else e->indirect_null_vbs |= 1u << l->vb_slot;
+            e->ib = ib; e->ib_off = ib_off; e->ib_type = isz == 4 ? WMTIndexTypeUInt32 : WMTIndexTypeUInt16;
+            e->ib_size = r.ib_size; e->ib_bounded = 1;
+        }
+        memset(&draw, 0, sizeof draw);
+        if (l->indexed) {
+            draw.kind = MC_DRAW_INDEXED; draw.u.drawi.icount = r.count; draw.u.drawi.inst = r.instances;
+            draw.u.drawi.start = r.start; draw.u.drawi.base = r.base_vertex; draw.u.drawi.istart = r.first_instance;
+        } else {
+            draw.kind = MC_DRAW; draw.u.draw.vcount = r.count; draw.u.draw.icount = r.instances;
+            draw.u.draw.vstart = r.start; draw.u.draw.istart = r.first_instance;
+        }
+        { unsigned before = e->draws; exec_draw(e, &draw); drawn += e->draws - before; }
+        if (g_vt_on > 0) mad_vt_draw(e, &draw);   /* madeira-bcd vis-trace, as for a direct draw */
+        continue;
+invalid:
+        rejected++;
+        if (said++ < 8) d3d12_log("[madeira-d3d12] indirect-reference: invalid CBV/VBV/IBV/draw range in record %u; skipped\n", k);
+        MAD_SKIP(e);
+    }
+    if (storage) NSObject_release(storage);
+    exec_indirect_reset(e, l);
+    { LONG n = InterlockedIncrement(&calls);
+      if (n <= 8 || (n % 512) == 0)
+          d3d12_log("[indirect-ref] call#%ld max=%u effective=%u stride=%u views=%u drawn=%u zero=%u invalid=%u\n",
+                    (long)n, c->u.iref.count, count, l->stride, (unsigned)l->views, drawn, zero, rejected); }
+}
+/* A redundant explicit NULL keeps a reference reset's defined NULL VB
+ * protection. An actual resource rebind restores ordinary explicit IA state. */
+static void exec_set_vertex_buffer(struct mad_exec *e, UINT slot, struct mad_resource *res, UINT64 off, UINT stride) {
+    if (slot >= 16) return;
+    e->vb[slot].res = res; e->vb[slot].off = off; e->vb[slot].stride = stride; e->vb[slot].bounded = 0;
+    if (res) e->indirect_null_vbs &= ~(1u << slot);
+}
+
 static void mad_exec_list(struct mad_queue *q, struct mad_list *l, obj_handle_t cb) {
     g_list_seq++;
     struct mad_exec e;
@@ -9867,7 +10239,7 @@ static void mad_exec_list(struct mad_queue *q, struct mad_list *l, obj_handle_t 
     e.topo = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     if (g_skin_now) mad_skin_begin(&e);   /* madeira-bcd skin-check */
     exec_rp_list_begin(&e);   /* madeira-bcd rp-carry: the pass the previous list handed over */
-    for (i = 0; i < l->ncmds; i++) {
+    for (i = 0; i < l->ncmds && !e.aborted; i++) {   /* indirect-reference.1 / clear-copy-order.1: an abort never replays on */
         const struct mad_cmd *c = &l->cmds[i];
         e.cur = i;   /* ml1137 */
         if (g_capture_on) mad_capture_log_op(c);   /* madeira-bcd */
@@ -9892,8 +10264,8 @@ static void mad_exec_list(struct mad_queue *q, struct mad_list *l, obj_handle_t 
         case MC_VP: e.vp = c->u.vp; e.has_vp = 1; break;
         case MC_SCISSOR: e.sc = c->u.scissor; e.has_sc = 1; break;
         case MC_TOPO: e.topo = c->u.topo; break;
-        case MC_IB: e.ib = c->u.ib.res; e.ib_off = c->u.ib.off; e.ib_type = c->u.ib.type; break;
-        case MC_VB: if (c->u.vb.slot < 16) { e.vb[c->u.vb.slot].res = c->u.vb.res; e.vb[c->u.vb.slot].off = c->u.vb.off; e.vb[c->u.vb.slot].stride = c->u.vb.stride; } break;
+        case MC_IB: e.ib = c->u.ib.res; e.ib_off = c->u.ib.off; e.ib_type = c->u.ib.type; e.ib_bounded = 0; break;
+        case MC_VB: exec_set_vertex_buffer(&e, c->u.vb.slot, c->u.vb.res, c->u.vb.off, c->u.vb.stride); break;   /* indirect-reference.1 */
         case MC_RTS:
             /* ml934d: D3D12 begins a new render pass at every OMSetRenderTargets.
              * For passes WITH attachments we reuse the encoder when the bindings
@@ -9957,6 +10329,7 @@ static void mad_exec_list(struct mad_queue *q, struct mad_list *l, obj_handle_t 
         case MC_QUERY_END: exec_query_end(&e, c); break;
         case MC_QUERY_RESOLVE: exec_query_resolve(&e, c); break;
         case MC_DRAW: case MC_DRAW_INDEXED: exec_draw(&e, c); if (g_vt_on > 0) mad_vt_draw(&e, c); break;   /* madeira-bcd vis-trace */
+        case MC_INDIRECT_REFERENCE: exec_indirect_reference(&e, c); break;   /* indirect-reference.1 */
         case MC_DRAW_INDIRECT: case MC_DRAW_INDEXED_INDIRECT: case MC_DISPATCH_INDIRECT: {
             struct mad_cmd t = *c; UINT k; UINT64 toff = 0;
             int tess = 0;
@@ -9996,10 +10369,10 @@ static void mad_exec_list(struct mad_queue *q, struct mad_list *l, obj_handle_t 
             rs_t = t1;
         }
     }
-    exec_rp_list_end(&e);   /* madeira-bcd rp-carry: may hand the open pass to the next list */
+    if (!e.aborted) exec_rp_list_end(&e);   /* madeira-bcd rp-carry: may hand the open pass to the next list; never an aborted one */
     if (e.renc) InterlockedIncrement(&g_pass_end_list);
     exec_end(&e);
-    while (e.npend) exec_flush_clear(&e, 0);
+    if (!e.aborted) while (e.npend) exec_flush_clear(&e, 0);
     if (rs) {
         int b;
         rs_sum[RS_LISTEND] += (LONG64)(mad_tick() - rs_t); rs_cnt[RS_LISTEND]++;
@@ -11548,6 +11921,8 @@ struct mad_cmdsig {
     struct mad_device *device;
     D3D12_COMMAND_SIGNATURE_DESC desc;
     D3D12_INDIRECT_ARGUMENT_DESC args[MAD_CMDSIG_ARGS_MAX];
+    struct mad_ir_layout reference_layout;   /* indirect-reference.1: valid = one of the three compound layouts */
+    struct mad_rootsig *reference_root;      /* indirect-reference.1: owned reference while valid */
 };
 static ID3D12CommandSignatureVtbl g_cmdsig_vtbl;
 
@@ -11558,7 +11933,16 @@ static HRESULT STDMETHODCALLTYPE cmdsig_QI(ID3D12CommandSignature *This, REFIID 
     return mad_qi(o, riid, out, 1);
 }
 static ULONG STDMETHODCALLTYPE cmdsig_AddRef(ID3D12CommandSignature *This) { return mad_addref((struct mad_obj *)This); }
-static ULONG STDMETHODCALLTYPE cmdsig_Release(ID3D12CommandSignature *This) { return mad_release((struct mad_obj *)This); }
+static ULONG STDMETHODCALLTYPE cmdsig_Release(ID3D12CommandSignature *This) {
+    struct mad_cmdsig *s = (struct mad_cmdsig *)This;
+    LONG r = InterlockedDecrement(&s->refs);
+    if (r == 0) { mad_pd_purge(s);   /* ml1143 */
+        if (s->reference_root) ID3D12RootSignature_Release((ID3D12RootSignature *)s->reference_root);   /* indirect-reference.1 */
+        d3d12_log("[madeira-d3d12] destroyed %s\n", s->name);
+        free(s);
+    }
+    return (ULONG)r;
+}
 static HRESULT STDMETHODCALLTYPE cmdsig_GetPrivateData(ID3D12CommandSignature *This, REFGUID g, UINT *n, void *d) {
     return mad_pd_get(This, g, n, d);   /* ml1143 */
 }
@@ -11595,6 +11979,20 @@ static HRESULT STDMETHODCALLTYPE device_CreateCommandSignature(ID3D12Device *Thi
     s->desc = *desc;
     memcpy(s->args, desc->pArgumentDescs, desc->NumArgumentDescs * sizeof s->args[0]);
     s->desc.pArgumentDescs = s->args;
+    {   /* indirect-reference.1: CBV+DRAW, CBV+DRAW_INDEXED, CBV+VBV+IBV+DRAW_INDEXED */
+        UINT types[MAD_CMDSIG_ARGS_MAX];
+        struct mad_rootsig *r = (struct mad_rootsig *)root_signature;
+        for (i = 0; i < desc->NumArgumentDescs; i++) types[i] = s->args[i].Type;
+        if (r && s->args[0].Type == D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT_BUFFER_VIEW &&
+            (desc->NumArgumentDescs != 4 || s->args[1].Type == D3D12_INDIRECT_ARGUMENT_TYPE_VERTEX_BUFFER_VIEW) &&
+            mad_ir_layout_init(&s->reference_layout, types, desc->NumArgumentDescs,
+                               desc->ByteStride, s->args[0].ConstantBufferView.RootParameterIndex,
+                               desc->NumArgumentDescs == 4 ? s->args[1].VertexBuffer.Slot : 0) &&
+            s->reference_layout.root_index < r->nparams &&
+            r->params[s->reference_layout.root_index].type == MADEIRA_IR_PARAM_CBV) {
+            s->reference_root = r; ID3D12RootSignature_AddRef(root_signature);
+        } else memset(&s->reference_layout, 0, sizeof s->reference_layout);
+    }
     {
         /* One line per signature: argument kinds are what ExecuteIndirect will
          * have to support, so the log lists them in creation order. */
@@ -12978,8 +13376,14 @@ static void exec_query_end(struct mad_exec *e, const struct mad_cmd *c) {
     }
 }
 static void exec_query_resolve(struct mad_exec *e, const struct mad_cmd *c) {
-    struct mad_vis_batch *v = mad_vis_get(e);
+    struct mad_vis_batch *v;
     struct mad_vis_resolve *r;
+    /* indirect-reference.1: the renderer cannot CPU-publish a query into
+     * GPU-only storage. Remember that unsupported dependency even after this
+     * batch has retired. */
+    if (c->u.query.dst && !c->u.query.dst->cpu)
+        InterlockedExchange(&c->u.query.dst->indirect_query_unpublished, 1);
+    v = mad_vis_get(e);
     if (!v || !mad_grow((void **)&v->r, &v->rcap, v->nr + 1, sizeof *v->r)) return;
     r = &v->r[v->nr++];
     r->heap = c->u.query.heap; r->type = c->u.query.type; r->start = c->u.query.index; r->count = c->u.query.count;
@@ -13007,6 +13411,17 @@ static void mad_vis_complete(struct mad_device *d, struct mad_vis_batch *v) {
     unsigned k, j;
     static unsigned said_nocpu;
     MTLCommandBuffer_waitUntilCompleted(v->cb);
+    if (v->failed) {
+        /* indirect-reference.1 / clear-copy-order.1: every referencing segment
+         * is terminal now; release owned objects without turning failed GPU
+         * work into fabricated query results. */
+        for (k = 0; k < v->nr; k++) {
+            qheap_Release((ID3D12QueryHeap *)v->r[k].heap);
+            ID3D12Resource_Release((ID3D12Resource *)v->r[k].dst);
+        }
+        for (k = 0; k < v->nq; k++) qheap_Release((ID3D12QueryHeap *)v->q[k].heap);
+        goto release_chunks;
+    }
     /* ml1092: a query's value is PUBLISHED at its End, in program order with
      * the resolves, so "End Q7 (37) / Resolve / reuse Q7, End (0) / Resolve"
      * delivers 37 then 0 -- the old two-pass form delivered 0 twice (Astra's
@@ -13043,6 +13458,7 @@ static void mad_vis_complete(struct mad_device *d, struct mad_vis_batch *v) {
         qheap_Release((ID3D12QueryHeap *)v->q[k].heap);
     }
 #undef MAD_VIS_APPLY
+release_chunks:
     EnterCriticalSection(&d->ring_lock);
     for (k = 0; k < v->nchunks; k++) {
         if (mad_grow((void **)&d->ring_pool, &d->ring_pool_cap, d->nring_pool + 1, sizeof *d->ring_pool)) {
@@ -18768,7 +19184,19 @@ static void STDMETHODCALLTYPE list_ExecuteIndirect(ID3D12GraphicsCommandList *Th
     struct mad_cmd *c;
     enum mad_ck kind;
     static unsigned said_multi, said_count, said_big;
-    if (!cs || !args || !max_count) return;
+    if (!cs || !args) return;
+    if (cs->reference_layout.valid && mad_indirect_reference_on()) {   /* indirect-reference.1 */
+        if (g_scbv_on > 0) mad_scbv_latch((struct mad_list *)This, 0);   /* madeira-bcd static-cbv, as for any draw */
+        c = mad_list_push((struct mad_list *)This, MC_INDIRECT_REFERENCE);
+        if (!c) return;
+        c->u.iref.args = (struct mad_resource *)args; c->u.iref.off = args_off;
+        c->u.iref.cnt = (struct mad_resource *)count_buf; c->u.iref.cnt_off = count_off;
+        c->u.iref.count = max_count; c->u.iref.layout = cs->reference_layout;
+        c->u.iref.root = cs->reference_root;
+        ID3D12RootSignature_AddRef((ID3D12RootSignature *)c->u.iref.root);
+        return;   /* max_count 0 is recorded too: it still resets the bindings */
+    }
+    if (!max_count) return;
     if (cs->desc.NumArgumentDescs != 1) {
         if (said_multi++ < 4) d3d12_log("[madeira-d3d12] ExecuteIndirect: signature with %u argument descs is not implemented; skipped\n", cs->desc.NumArgumentDescs);
         return;
