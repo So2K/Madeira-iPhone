@@ -146,8 +146,17 @@ restore_makefiles() {
 }
 trap restore_makefiles EXIT
 in_farm() { [ -n "$(find "$DEST" -maxdepth 1 -iname "$1.dll" 2>/dev/null)" ]; }
+# The bootstrap CRT must retain its upstream delayed GUI/security imports.
+# Turning those into ordinary dependencies creates ucrtbase -> user32/advapi32
+# -> ... -> msacm32 -> ucrtbase before MSVCRT_locale is initialized.
+# Always relink this one target, including UNDELAY=0 incremental invocations,
+# so an earlier undelayed output cannot survive in the local build cache.
+for m in "$@"; do
+    [ "$m" != ucrtbase ] || rm -f "$B/dlls/ucrtbase/arm64ec-windows/ucrtbase.dll"
+done
 if [ "${UNDELAY:-1}" != 0 ]; then
     for m in "$@"; do
+        [ "$m" != ucrtbase ] || continue
         mk="$R/wine/dlls/$m/Makefile.in"
         [ -f "$mk" ] || continue
         delayed="$(sed -n 's/^DELAYIMPORTS[[:space:]]*=[[:space:]]*//p' "$mk")"
